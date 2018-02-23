@@ -1,0 +1,6 @@
+name = Limit nodes for user
+description = Set limit to node count for user with Escort role
+core = 7.x
+package = Custom modules
+
+files[] = akm_nodelimit.module

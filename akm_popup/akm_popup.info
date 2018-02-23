@@ -1,0 +1,10 @@
+name = AKM popup
+description = Add popups on site
+core = 7.x
+package = Custom modules
+
+files[] = akm_popup.module
+
+dependencies[] = fancybox
+
+configure = admin/config/people/popup

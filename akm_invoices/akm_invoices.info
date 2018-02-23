@@ -1,0 +1,11 @@
+name = Invoices for advertising
+description = Send invoices to users for advertising every month
+core = 7.x
+package = Custom modules
+
+files[] = akm_invoices.entity.inc
+files[] = akm_invoices.module
+
+dependencies[] = entity
+
+configure = admin/config/people/gce-invoices

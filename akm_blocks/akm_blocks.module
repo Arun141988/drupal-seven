@@ -1,0 +1,581 @@
+<?php
+
+/**
+ * Implements hook_block_info().
+ */
+function akm_blocks_block_info() {
+  $blocks = array();
+  $blocks['latest_from_blog'] = array(
+    'info' => t('Latest from our blog block'),
+    'cache' => DRUPAL_CACHE_GLOBAL,
+  );
+  $blocks['page_first_banner'] = array(
+    'info' => t('Page first bottom banner'),
+    'cache' => DRUPAL_CACHE_GLOBAL,
+  );
+  $blocks['page_second_banner'] = array(
+    'info' => t('Page second bottom banner'),
+    'cache' => DRUPAL_CACHE_GLOBAL,
+  );
+  $blocks['footer_first_triptych'] = array(
+    'info' => t('Footer first triptych'),
+    'cache' => DRUPAL_CACHE_GLOBAL,
+  );
+  $blocks['footer_second_triptych'] = array(
+    'info' => t('Footer second triptych'),
+    'cache' => DRUPAL_CACHE_GLOBAL,
+  );
+  $blocks['footer_third_triptych'] = array(
+    'info' => t('Footer third triptych'),
+    'cache' => DRUPAL_CACHE_GLOBAL,
+  );
+  $blocks['footer_partners'] = array(
+    'info' => t('Partners block'),
+    'cache' => DRUPAL_CACHE_GLOBAL,
+  );
+  return $blocks;
+}
+
+function akm_blocks_theme() {
+
+  $items['last-articles'] = array(
+    'variables' => array(
+      'title' => NULL,
+      'summary' => NULL,
+      'author' => NULL,
+      'url' => NULL,
+    ),
+    'template' => 'last-articles',
+    'path' => drupal_get_path('module', 'akm_blocks') . '/theme',
+  );
+  $items['akm_blocks_table_drag_components'] = array(
+    'render element' => 'element',
+  );
+
+  return $items;
+}
+
+/**
+ * Custom theme output.
+ */
+function theme_akm_blocks_table_drag_components($vars) {
+  $element = $vars['element'];
+  drupal_add_tabledrag('partners_table', 'order', 'sibling', 'item-row-weight');
+
+  $header = array(
+    'file' => t('Image'),
+    'text' => t('Text & Link'),   
+    'wght' => t('Weight'),
+  );
+
+  $rows = array();
+  foreach (element_children($element) as $key) {
+    $row = array();
+    $row['data'] = array();    
+    $row['data'][] = drupal_render($element[$key]['file' . $key]);
+    $row['data'][] = drupal_render($element[$key]['text' . $key])
+      . drupal_render($element[$key]['link' . $key]);
+    $row['data'][] = drupal_render($element[$key]['wght' . $key]);
+    $row['class'] = array('draggable');
+
+    $rows[] = $row;
+  }
+
+  return theme('table', array(
+    'header' => $header,
+    'rows' => $rows,
+    'attributes' => array('id' => 'partners_table'),
+  ));
+}
+
+/**
+ * Implements hook_block_configure().
+ */
+function akm_blocks_block_configure($delta = '') {
+  $form = array();
+
+  switch ($delta) {
+    case 'latest_from_blog':
+      $form['sub_title'] = array(
+        '#title' => t('Block sub title'),
+        '#type' => 'textfield',
+        '#default_value' => variable_get('akm_blocks_' . $delta . '_sub_title', ''),
+        '#size' => 100,
+      );
+      $form['recent_post_count'] = array(
+        '#type' => 'select',
+        '#title' => t('Number of recent content items to display'),
+        '#default_value' => variable_get('akm_blocks_' . $delta . '_count', 1),
+        '#options' => drupal_map_assoc(range(1, 20)),
+      );
+      $form['blog_post_type'] = array(
+        '#type' => 'select',
+        '#title' => t('Blog post type'),
+        '#default_value' => variable_get('akm_blocks_' . $delta . '_type', ''),
+        '#options' => drupal_map_assoc(array_keys(node_type_get_types())),
+      );
+
+      break;
+
+    case 'page_first_banner':
+    case 'page_second_banner':
+
+      $form['text_body'] = array(
+        '#type' => 'text_format',
+        '#title' => t('Banner text'),
+        '#default_value' => variable_get('akm_blocks_' . $delta . '_text', ''),
+      );
+
+    case 'footer_first_triptych':
+    case 'footer_second_triptych':
+    case 'footer_third_triptych':
+
+      $form['file'] = array(
+        '#name' => 'block_image',
+        '#type' => 'managed_file',
+        '#title' => t('Choose block image'),
+        //'#required' => TRUE,
+        '#description' => t('Select an Image for the banner block.  Only *.gif, *.png, *.jpg, and *.jpeg images allowed.'),
+        '#default_value' => variable_get('akm_blocks_' . $delta . '_fid', ''),
+        '#upload_location' => 'public://akm_blocks/',
+        '#upload_validators' => array(
+          'file_validate_extensions' => array('gif png jpg jpeg'),
+        ),
+      );
+      $form['link'] = array(
+        '#title' => t('Link'),
+        '#type' => 'textfield',
+        '#default_value' => variable_get('akm_blocks_' . $delta . '_link', ''),
+      );
+
+      break;
+
+    case 'footer_partners':
+
+      $items = variable_get('akm_blocks_' . $delta, array());
+
+      // We can't use '#tree' because block_admin_configure_submit() is failed.
+      $form['partners'] = array(
+        '#type' => 'fieldset',
+        '#title' => t('Block settings'),
+        '#theme' => 'akm_blocks_table_drag_components',
+        '#prefix' => '<div id="partners-fieldset-wrapper">',
+        '#suffix' => '</div>',
+      );
+
+
+      foreach ($items as $i => $item) {
+        $k = $i + 1;
+        $form['partners'][$k]['file' . $k] = array(
+          '#name' => 'block_image',
+          '#type' => 'managed_file',
+          '#title' => t('Choose block image'),
+          '#description' => t('Select an Image for the banner block.<br> Only *.gif, *.png, *.jpg, and *.jpeg images allowed.'),
+          '#default_value' => isset($item['file']) ? $item['file'] : '',
+          '#upload_location' => 'public://akm_blocks/',
+          '#upload_validators' => array(
+            'file_validate_extensions' => array('gif png jpg jpeg'),
+          ),
+        );
+        $form['partners'][$k]['fid' . $k] = array(
+          '#type' => 'hidden',
+          '#value' => isset($item['file']) ? $item['file'] : '',
+        );
+        $form['partners'][$k]['text' . $k] = array(
+          '#title' => t('Title'),
+          '#description' => t('If you add an image that title will not shown'),
+          '#type' => 'textfield',
+          '#default_value' => isset($item['text']) ? $item['text'] : '',
+        );
+        $form['partners'][$k]['link' . $k] = array(
+          '#title' => t('Link'),
+          '#type' => 'textfield',
+          '#default_value' => isset($item['link']) ? $item['link'] : '',
+        );
+        $form['partners'][$k]['wght' . $k] = array(
+          '#type' => 'textfield',
+          '#default_value' => $k,
+          '#size' => 3,
+          '#attributes' => array('class' => array('item-row-weight')),
+        );
+      }
+
+      $form['add_one_more'] = array(
+        '#type' => 'submit',
+        '#value' => t('Add one more'),
+        '#submit' => array('akm_blocks_add_more_partner'),
+        '#ajax' => array(
+          'callback' => 'akm_blocks_add_more_partner_callback',
+          'wrapper' => 'partners-fieldset-wrapper',
+        ),
+      );
+
+      break;
+  }
+  return $form;
+}
+
+/**
+ * Callback for 'Add one more' button.
+ */
+function akm_blocks_add_more_partner_callback($form, $form_state) {
+  return $form['settings']['partners'];
+}
+
+/**
+ * Submit handler for the "add-one-more" button.
+ */
+function akm_blocks_add_more_partner($form, &$form_state) {
+  $footer_partners = variable_get('akm_blocks_footer_partners', array());
+  // Add new element.
+  $footer_partners[] = array();
+  variable_set('akm_blocks_footer_partners', $footer_partners);
+  $form_state['rebuild'] = TRUE;
+}
+
+/**
+ * Implements hook_block_save().
+ */
+function akm_blocks_block_save($delta = '', $edit = array()) {
+  switch ($delta) {
+    case 'latest_from_blog':
+
+      variable_set('akm_blocks_' . $delta . '_sub_title', $edit['sub_title']);
+      variable_set('akm_blocks_' . $delta . '_count', $edit['recent_post_count']);
+      variable_set('akm_blocks_' . $delta . '_type', $edit['blog_post_type']);
+
+      break;
+
+    case 'page_first_banner':
+    case 'page_second_banner':
+
+      // Saving text.
+      variable_set('akm_blocks_' . $delta . '_text', $edit['text_body']['value']);
+
+    case 'footer_first_triptych':
+    case 'footer_second_triptych':
+    case 'footer_third_triptych':
+
+      // Saving the file.
+      if ($edit['file']) {
+        $file = file_load($edit['file']);
+        $file->status = FILE_STATUS_PERMANENT;
+        file_save($file);
+        $block = block_load('akm_blocks', $delta);
+        file_usage_add($file, 'akm_blocks', 'block', $block->bid);
+        variable_set('akm_blocks_' . $delta . '_fid', $file->fid);
+      }
+      else {
+        $fid = variable_get('akm_blocks_' . $delta . '_fid');
+        if ($fid && $file = file_load($fid)) {
+          $block = block_load('akm_blocks', $delta);
+          file_usage_delete($file, 'akm_blocks', 'block', $block->bid);
+          file_delete($file);
+        }
+        variable_set('akm_blocks_' . $delta . '_fid', FALSE);
+      }
+
+      variable_set('akm_blocks_' . $delta . '_link', $edit['link']);
+
+      break;
+
+    case 'footer_partners':
+
+      $footer_partners = array();
+
+      $fields = array('file', 'text', 'link', 'wght');
+      $footer_partners = array();
+
+      foreach ($edit as $key => $value) {
+        $field_name = substr($key, 0, 4);
+        if (in_array($field_name, $fields) && !empty($value)) {
+          $i = (int) substr($key, 4, 1);
+          // Save or remove file.
+          if ($field_name == 'file') {
+            // If file empty delete it.
+            if (empty($edit[$key])) {
+              $fid = $edit['fid' . $i];
+              if ($fid && $file = file_load($fid)) {
+                file_usage_delete($file, 'akm_blocks', 'block', $file->fid);
+                file_delete($file);
+              }
+            }
+            // User Change file to other.
+            elseif ($edit[$key] != $edit['fid' . $i]) {
+              $file = file_load($edit[$key]);
+              $file->status = FILE_STATUS_PERMANENT;
+              file_save($file);
+              file_usage_add($file, 'akm_blocks', 'block', $file->fid);
+            }
+          }
+
+          if (!empty($value)) {
+            $footer_partners[$i][$field_name] = $value;
+          }
+        }
+      }
+
+      // Sort the items.
+      usort($footer_partners, '_akm_blocks_sort_partners');
+      // Remove weight from data.
+      foreach ($footer_partners as $key => $item) {
+        if (isset($item['wght'])) {
+          unset($footer_partners[$key]['wght']);
+        }
+        if (empty($footer_partners[$key]) && count($footer_partners) > 1) {
+          unset($footer_partners[$key]);
+        }
+      }
+
+      variable_set('akm_blocks_' . $delta, $footer_partners);
+
+      break;
+  }
+}
+
+/**
+ * Custom sort by weight.
+ */
+function _akm_blocks_sort_partners($a, $b) {
+  if (isset($a['wght']) && isset($b['wght'])) {
+    return $a['wght'] < $b['wght'] ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function akm_blocks_block_view($delta = '') {
+  $block = array();
+  switch ($delta) {
+    case 'latest_from_blog':
+
+      $block['content'] = akm_blocks_latest_post_block_view($delta);
+
+      break;
+
+    case 'page_first_banner':
+    case 'page_second_banner':
+
+      $block['content'] = akm_blocks_page_block_view($delta);
+      $link = variable_get('akm_blocks_' . $delta . '_link', '');
+      $block['link'] = $link ? $link : '';
+
+      break;
+
+    case 'footer_first_triptych':
+    case 'footer_second_triptych':
+    case 'footer_third_triptych':
+
+      $block['content'] = akm_blocks_triptych_block_view($delta);
+      $link = variable_get('akm_blocks_' . $delta . '_link', '');
+      $block['link'] = $link ? $link : '#';
+
+      break;
+
+    case 'footer_partners':
+      $block['content'] = akm_blocks_partners_view($delta);
+      break;
+  }
+
+  return $block;
+}
+
+/**
+ * Return renderable array of block content.
+ */
+function akm_blocks_partners_view($delta) {
+  $block = array();
+
+  if ($partners = variable_get('akm_blocks_' . $delta)) {
+    $output = '<ul>';
+
+    foreach ($partners as $k => $partner) {
+      $classes_array = array();
+      $image = $text = $content = '';
+      $classes_array[] = 'partner-num-' . $k;
+
+      // Add banner image if exist.
+      if (!empty($partner['file'])) {
+        $image_file = file_load($partner['file']);
+        $image_path = '';
+
+        if (isset($image_file->uri)) {
+          $image_path = $image_file->uri;
+        }
+
+        $classes_array[] = 'partner-image-' . $k;
+
+        $image = theme('image', array('path' => $image_file->uri));
+      }
+      // Add text if exist.
+      if (!empty($partner['text'])) {
+        $classes_array[] = 'partner-text-' . $k;
+        $text = '<p class="banner-text">' . $partner['text'] . '</p>';
+      }
+
+      // Add link if exist.
+      if (!empty($partner['link'])) {
+        $classes_array[] = 'partner-link-' . $k;
+        $content .= l($image . $text, $partner['link'], array('html' => TRUE));
+      }
+      else {
+        $content .= $image . $text;
+      }
+
+      $classes = 'class="' . implode(' ', $classes_array) . '"';
+
+      $output .= '<li ' . $classes . '>' . $content . '</li>';
+    }
+
+    $output .= '</ul>';
+    $block['data'] = array(
+      '#type' => 'markup',
+      '#markup' => $output,
+    );
+  }
+  return $block;
+}
+
+/**
+ * Return renderable array of block content.
+ */
+function akm_blocks_page_block_view($delta) {
+  // Get image.
+  if ($fid = variable_get('akm_blocks_' . $delta . '_fid', '')) {
+    $image_file = file_load($fid);
+    $image_path = '';
+
+    if (isset($image_file->uri)) {
+      $image_path = $image_file->uri;
+    }
+
+    $image_item = array(
+      'style_name' => 'banner',
+      'path' => $image_path,
+      'attributes' => array(
+        'class' => 'img-responsive',
+      ),
+    );
+
+    $image = theme('image_style', $image_item);
+
+    $block['image'] = array(
+      '#type' => 'markup',
+      '#markup' => $image,
+      '#prefix' => '<div class="news-img">',
+      '#suffix' => '</div>',
+    );
+  }
+
+  // Get summary.
+  if ($text = variable_get('akm_blocks_' . $delta . '_text', '')) {
+    $block['sub_title'] = array(
+      '#type' => 'markup',
+      '#markup' => $text,
+      '#prefix' => '<div class="news-descr"><p>',
+      '#suffix' => '</p></div>',
+    );
+  }
+
+  return $block;
+}
+
+/**
+ * Return renderable array of block content.
+ */
+function akm_blocks_latest_post_block_view($delta) {
+  $block = array();
+
+  // Get subtitle.
+  if ($text = variable_get('akm_blocks_' . $delta . '_sub_title', '')) {
+    $block['sub_title'] = array(
+      '#type' => 'markup',
+      '#markup' => $text,
+      '#prefix' => '<p>',
+      '#suffix' => '</p>',
+    );
+  }
+  // Get posts.
+  $count = variable_get('akm_blocks_' . $delta . '_count', 1);
+  $type = variable_get('akm_blocks_' . $delta . '_type', '');
+  if ($count && $type) {
+
+    // Based on the node types create a query and then load the node types.
+    $query = new EntityFieldQuery();
+    $query
+      ->entityCondition('entity_type', 'node')
+      ->entityCondition('bundle', $type)
+      ->propertyCondition('status', 1)
+      ->propertyOrderBy('created', 'DESC')
+      ->range(0, $count);
+
+    $result = $query->execute();
+    $nodes = array();
+    if (isset($result['node'])) {
+      $nids = array_keys($result['node']);
+      $nodes = node_load_multiple($nids);
+    }
+
+    foreach ($nodes as $nid => $node) {
+      $author = user_load($node->uid);
+      $author_name = $author->name;
+      $template_variables = array(
+        'title' => $node->title,
+        'summary' => text_summary($node->body[LANGUAGE_NONE][0]['value'], NULL, 300),
+        'author' => $author_name,
+        'url' => drupal_get_path_alias('node/' . $nid),
+      );
+      $block['message-' . $nid] = array(
+        '#type' => 'markup',
+        '#markup' => theme('last-articles', $template_variables),
+      );
+    }
+  }
+
+  return $block;
+}
+
+/**
+ * Return renderable array of block content.
+ */
+function akm_blocks_triptych_block_view($delta) {
+  $block = array();
+
+  // Get image.
+  if ($fid = variable_get('akm_blocks_' . $delta . '_fid', '')) {
+    $image_file = file_load($fid);
+    $image_path = '';
+
+    if (isset($image_file->uri)) {
+      $image_path = $image_file->uri;
+    }
+
+    $image_item = array(
+      'style_name' => 'banner',
+      'path' => $image_path,
+      'attributes' => array(
+        'class' => 'img-responsive',
+      ),
+    );
+
+    $image = theme('image_style', $image_item);
+
+    $block['image'] = array(
+      '#type' => 'markup',
+      '#markup' => $image,
+    );
+  }
+  return $block;
+}
+
+/**
+ * Implements  hook_form_FORM_ID_alter().
+ */
+function akm_blocks_form_block_admin_configure_alter(&$form, $form_state) {
+  if ($form['module']['#value'] == 'akm_blocks') {
+    $form['visibility_title']['#access'] = FALSE;
+    $form['visibility']['#access'] = FALSE;
+  }
+}

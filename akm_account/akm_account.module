@@ -1,0 +1,449 @@
+<?php
+
+/**
+ * Implements hook_theme().
+ */
+function akm_account_theme() {
+  $items['field-file-multiple'] = array(
+    'variables' => array(
+      'rows' => NULL,
+      'attributes' => NULL,
+    ),
+    'template' => 'field--file--multiple',
+    'path' => drupal_get_path('theme', 'gce') . '/templates/fields',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function akm_account_form_alter(&$form, &$form_state, $form_id) {
+
+  // Cached form because we use ajax and BOOTCHA disallow cache a form.
+  if ($form_id == 'user_register_form') {
+    $form_state['no_cache'] = FALSE;
+  }
+
+  if (arg(0) != 'admin') {
+    $form['#attached']['js'][] = drupal_get_path('theme', 'gce') . '/js/icheck.min.js';
+    $form['#attached']['js'][] = drupal_get_path('theme', 'gce') . '/js/select2.min.js';
+    $form['#attached']['css'][] = drupal_get_path('theme', 'gce') . '/css/check-radio.css';
+    $form['#attached']['css'][] = drupal_get_path('theme', 'gce') . '/css/select2.css';
+  }
+
+  if ($form_id == 'user_register_form' || $form_id == 'user_profile_form') {
+
+    $form['account']['name']['#title'] = t('Profile name');
+    $form['account']['mail']['#title'] = t('Contact email address');
+
+    foreach ($form as $key => $element) {
+      if (is_array($element) && !empty($element[LANGUAGE_NONE]['#type']) && $element[LANGUAGE_NONE]['#type'] == 'radios') {
+        // Remove N/A for radiobuttons.
+        unset($form[$key][LANGUAGE_NONE]['#options']['_none']);
+      }
+      // Remove file upload title.
+      if (is_array($element) && !empty($element[LANGUAGE_NONE]['#file_upload_title'])) {
+        // Remove file_upload_title.
+        $form[$key][LANGUAGE_NONE]['#file_upload_title'] = '';
+      }
+    }
+
+    // Sort public profile options.
+    if (!empty($form['field_public_profile'])) {
+      $form['field_public_profile'][LANGUAGE_NONE]['#options'] = array_reverse($form['field_public_profile'][LANGUAGE_NONE]['#options'], TRUE);
+    }
+
+    // Hide some format elements.
+    $form['field_about_me_tab']['#after_build'][] = 'akm_account_node_form_after_build';
+
+    if (!empty($form['field_slider_image']) && !empty($form['featured_account'])) {
+      $form['field_slider_image']['#states'] = array(
+        'visible' => array(
+          ':input[name="featured_account[und]"]' => array('checked' => TRUE),
+        ),
+      );
+    }
+
+    if (!empty($form['field_terms_conditions'])) {
+      $form['field_terms_conditions'][LANGUAGE_NONE]['#title'] = $form['field_terms_conditions'][LANGUAGE_NONE]['#description'];
+      $form['field_terms_conditions'][LANGUAGE_NONE]['#description'] = '';
+    }
+
+    if (!empty($form['field_videos'])) {
+      $form['field_videos']['und']['#file_upload_description'] .= $form['field_videos']['und']['#description'];
+      unset($form['field_videos']['und']['#description']);
+    }
+
+    if (!empty($form['field_user_avatar'][LANGUAGE_NONE][0]['#title'])) {
+      $form['field_user_avatar'][LANGUAGE_NONE][0]['#title_display'] = 'invisible';
+    }
+
+    // Move hide email field.
+    if (!empty($form['field_hide_e_mail'])) {
+      $form['account']['mail']['#weight'] = -9;
+      $form['account']['field_hide_e_mail'] = $form['field_hide_e_mail'];
+      $form['account']['field_hide_e_mail']['#weight'] = -8;
+      unset($form['field_hide_e_mail']);
+    }
+
+    // Wrapper a password fields.
+    $form['account']['pass']['#prefix'] = '<div>';
+    $form['account']['current_pass_required_values']['#suffix'] = '</div>';
+
+    // Move some fields to admin groups.
+    if (!empty($form['#groups']['group_admin_options'])) {
+      $form['status'] = $form['account']['status'];
+      unset($form['account']['status']);
+      $form['#group_children']['status'] = 'group_admin_options';
+
+      $form['roles'] = $form['account']['roles'];
+      unset($form['account']['roles']);
+      $form['#group_children']['roles'] = 'group_admin_options';
+
+      $form['notify'] = $form['account']['notify'];
+      unset($form['account']['notify']);
+      $form['#group_children']['notify'] = 'group_admin_options';
+    }
+
+    if (!empty($form['field_youtube_video'])) {
+      $i = 0;
+      while (!empty($form['field_youtube_video'][LANGUAGE_NONE][$i])) {
+        $form['field_youtube_video'][LANGUAGE_NONE][$i]['#process'][] = 'akm_account_youtube_uploader_field_widget_process';
+        $i++;
+      }
+    }
+
+    if (!empty($form['field_embed_url'])) {
+      $i = 0;
+      while (!empty($form['field_embed_url'][LANGUAGE_NONE][$i])) {
+        $form['field_embed_url'][LANGUAGE_NONE][$i]['video_url']['#size'] = 1;
+        $i++;
+      }
+    }
+
+    $form['field_in_call_rate'][LANGUAGE_NONE][0]['value']['#attributes'] = array('maxlength' => 200);
+    $form['field_out_call_rate'][LANGUAGE_NONE][0]['value']['#attributes'] = array('maxlength' => 200);
+    $form['field_additional_rates'][LANGUAGE_NONE][0]['value']['#attributes'] = array('maxlength' => 200);
+    $form['field_front_page_content_text'][LANGUAGE_NONE][0]['value']['#attributes'] = array('maxlength' => 430);
+
+    if (!empty($form['field_tour_collection'])) {
+      // Set limit for tour location to 8 elements.
+      if (!empty($form['field_tour_collection'][LANGUAGE_NONE]['#max_delta'])
+        && $form['field_tour_collection'][LANGUAGE_NONE]['#max_delta'] > 6) {
+        $form['field_tour_collection'][LANGUAGE_NONE]['add_more']['#access'] = FALSE;
+      }
+      // Clear dates if user don't have any tours.
+      if (empty($form['field_tour_collection'][LANGUAGE_NONE][0]['field_tour'][LANGUAGE_NONE]['#default_value'])
+        && !$form['field_tour_collection'][LANGUAGE_NONE]['#max_delta']) {
+        $form['field_tour_collection'][LANGUAGE_NONE][0]['field_tour_start_date'][LANGUAGE_NONE][0]['#default_value']['value'] = '';
+        $form['field_tour_collection'][LANGUAGE_NONE][0]['field_tour_end_date'][LANGUAGE_NONE][0]['#default_value']['value'] = '';
+      }
+      // Add tour location validation.
+      $form['#validate'][] = 'akm_account_user_profile_form_validate';
+    }
+  }
+
+  if ($form_id == 'user_pass' || $form_id == 'user_login' || $form_id == 'user_register_form') {
+    // Add term of use to form.
+    akm_account_add_trem_of_use_to_form($form, $form_state);
+  }
+
+  if ($form_id == 'story_node_form' || $form_id == 'adult_relax_node_form') {
+    // Hide some format elements.
+    $form['body']['#after_build'][] = 'akm_account_node_form_after_build';
+  }
+}
+
+function akm_account_youtube_uploader_field_widget_process($element, &$form_state, $form) {
+
+  // Modify youtube upload element.
+  $element['video_title']['#weight'] = 15;
+  $element['upload']['#title'] = '';
+  $element['#title'] = '';
+
+  return $element;
+}
+
+/**
+ * Hide some format elements.
+ */
+function akm_account_node_form_after_build(&$form) {
+  $form[LANGUAGE_NONE][0]['format']['guidelines']['#access'] = FALSE;
+  $form[LANGUAGE_NONE][0]['format']['help']['#access'] = FALSE;
+  $form[LANGUAGE_NONE][0]['format']['#attributes']['class'][] = 'element-hidden';
+  return $form;
+}
+
+/**
+ * Implement hook_form_FORM_ID_alter().
+ */
+function akm_account_form_user_login_alter(&$form, &$form_state) {
+
+  $form['#prefix'] = isset($form['#prefix']) ? $form['#prefix'] . '<div class="row">' : '<div class="row">';
+  $form['#suffix'] = isset($form['#suffix']) ? '</div>' . $form['#suffix'] : '</div>';
+  $form['#attributes']['class'] = 'login-form col-md-6 col-xs-12';
+  $form['name']['#description'] = '';
+  $form['pass']['#description'] = '';
+  $form['actions']['reset_password'] = array(
+    '#prefix' => '<div class="forgot-pass">',
+    '#suffix' => '</div>',
+    '#markup' => 'Forgot password? Click <a href="/user/password">here</a> to retrieve it.',
+  );
+}
+
+/**
+ * Implement hook_form_FORM_ID_alter().
+ */
+function akm_account_form_user_pass_alter(&$form, &$form_state) {
+  $form['#prefix'] = isset($form['#prefix']) ? $form['#prefix'] . '<div class="row">' : '<div class="row">';
+  $form['#suffix'] = isset($form['#suffix']) ? '</div>' . $form['#suffix'] : '</div>';
+  $form['#attributes']['class'] = 'user-pass-form col-md-6 col-xs-12';
+}
+
+/**
+ * Helper function add term of use to form.
+ */
+function akm_account_add_trem_of_use_to_form(&$form, &$form_state) {
+
+  $term_of_use = variable_get('akm_account_term_of_use', array('value' => '', 'format' => 'filtered_html'));
+  $term_of_use = '<div class="notice">' . $term_of_use['value'] . '</div>';
+
+  $form['#prefix'] = isset($form['#prefix']) ? $term_of_use . $form['#prefix'] : $term_of_use;
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ *
+ * Add settings for register and forgot password forms.
+ */
+function akm_account_form_user_admin_settings_alter(&$form, &$form_state) {
+  $form['register_settings'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Register settings'),
+    '#weight' => 0,
+  );
+  $term_of_use = variable_get('akm_account_term_of_use', array('value' => '', 'format' => 'filtered_html '));
+  $form['register_settings']['akm_account_term_of_use'] = array(
+    '#type' => 'text_format',
+    '#title' => t('Term of use message on login page'),
+    '#default_value' => $term_of_use['value'],
+    '#format' => $term_of_use['format'],
+  );
+}
+
+/**
+ * Implements hook_field_widget_WIDGET_TYPE_form_alter().
+ */
+function akm_account_field_widget_video_embed_field_video_form_alter(&$element, &$form_state, $context) {
+  $element['video_url']['#title'] = '';
+}
+
+/**
+ * Custom profile form validation.
+ */
+function akm_account_user_profile_form_validate($form, &$form_state) {
+  $values = $form_state['values'];
+
+  // Get field_tour_collection children keys.
+  if (!empty($form['field_tour_collection'][LANGUAGE_NONE])) {
+    $items = 0;
+    $tour_collection_keys = element_children($form['field_tour_collection'][LANGUAGE_NONE]);
+    foreach ($tour_collection_keys as $k => $v) {
+      if (is_int($v)) {
+        $items++;
+        $start_date = empty($values['field_tour_collection'][LANGUAGE_NONE][$v]['field_tour_start_date'][LANGUAGE_NONE][0]['value'])
+          ? 0 : strtotime($values['field_tour_collection'][LANGUAGE_NONE][$v]['field_tour_start_date'][LANGUAGE_NONE][0]['value']);
+        $end_date = empty($values['field_tour_collection'][LANGUAGE_NONE][$v]['field_tour_end_date'][LANGUAGE_NONE][0]['value'])
+          ? 0 : strtotime($values['field_tour_collection'][LANGUAGE_NONE][$v]['field_tour_end_date'][LANGUAGE_NONE][0]['value']);
+        // Set error if $start_date > $end_date.
+        if ($start_date && $end_date && ($start_date > $end_date)) {
+          form_set_error('field_tour_collection][und][' . $v . '][field_tour_start_date][und');
+          form_set_error('field_tour_collection][und][' . $v . '][field_tour_end_date][und',
+            t('Tour End date must be greater than the Tour start date.'));
+        }
+      }
+    }
+    if ($items > 8) {
+      form_set_error('', t('Allowed maximum 8 tour locations.'));
+    }
+  }
+}
+
+/**
+ * Implement hook_menu_alter().
+ */
+function akm_account_menu_alter(&$items) {
+  $items['admin/people']['page callback'] = 'akm_account_user_admin';
+}
+
+/**
+ * Page callback: Generates the appropriate user administration form.
+ *
+ * @see user_admin()
+ */
+function akm_account_user_admin($callback_arg = '') {
+  $op = isset($_POST['op']) ? $_POST['op'] : $callback_arg;
+
+  switch ($op) {
+    case t('Create new account'):
+    case 'create':
+      $build['user_register'] = drupal_get_form('user_register_form');
+      break;
+
+    default:
+      if (!empty($_POST['accounts']) && isset($_POST['operation']) && ($_POST['operation'] == 'cancel')) {
+        $build['user_multiple_cancel_confirm'] = drupal_get_form('user_multiple_cancel_confirm');
+      }
+      elseif (!empty($_POST['accounts']) && isset($_POST['operation']) && ($_POST['operation'] == 'akm_account_send_new_invoice_mail')) {
+        $build['user_multiple_new_invoice_confirm'] = drupal_get_form('user_multiple_new_invoice_confirm');
+      }
+      else {
+        $build['user_filter_form'] = drupal_get_form('user_filter_form');
+        $build['user_admin_account'] = drupal_get_form('user_admin_account');
+      }
+  }
+  return $build;
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function user_multiple_new_invoice_confirm($form, &$form_state) {
+  $edit = $form_state['input'];
+
+  $form['operation'] = array('#type' => 'hidden', '#value' => 'akm_account_send_new_invoice_mail');
+
+  $form['accounts'] = array(
+    '#prefix' => '<ul>',
+    '#suffix' => '</ul>',
+    '#tree' => TRUE,
+  );
+  $accounts = user_load_multiple(array_keys(array_filter($edit['accounts'])));
+  foreach ($accounts as $uid => $account) {
+    // Prevent user 1 from being canceled.
+    if ($uid <= 1) {
+      continue;
+    }
+    $form['accounts'][$uid] = array(
+      '#type' => 'hidden',
+      '#value' => $uid,
+      '#prefix' => '<li>',
+      '#suffix' => check_plain($account->name) . "</li>\n",
+    );
+  }
+
+  return confirm_form($form,
+    t('Are you sure you want to send new invoice to these users ?'),
+    'admin/people', t('This action cannot be undone.'),
+    t('Send new invoice'), t('Cancel'));
+}
+
+/**
+ * Submit handler for mass-account new submission send.
+ *
+ * @see user_multiple_new_invoice_confirm()
+ */
+function user_multiple_new_invoice_confirm_submit($form, &$form_state) {
+  if (!empty($form_state['values']['accounts'])) {
+    $accounts = $form_state['values']['accounts'];
+    $accounts = user_load_multiple($accounts);
+    foreach ($accounts as $user) {
+      if ($current_invoice = gce_invoices_get_new_invoice($user)) {
+        // Update invoice.
+        $user->current_invoice['und'][0]['value'] = $current_invoice;
+        $user->current_invoice['und'][0]['safe_value'] = $current_invoice;
+        // Delete bill scan.
+        $user->bill_scan = array();
+
+        // Save user and send mail.
+        if ($updated_user = user_save($user)) {
+          $context['user'] = $updated_user;
+          drupal_mail('gce_invoices', 'new_invoice_mail', $user->mail, language_default(), $context);
+          // Duplicate mail to admin.
+          $to_admin = variable_get('gce_core_site_mail_group', variable_get('site_mail', ini_get('sendmail_from')));
+          drupal_mail('gce_invoices', 'new_invoice_mail', $to_admin, language_default(), $context);
+          watchdog('gce_invoices', 'New invoise to %user sended with hash %currinvoice.', array(
+            '%user' => $user->name,
+            '%currinvoice' => $current_invoice,
+          ));
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_user_operations().
+ */
+function akm_account_user_operations() {
+  $operations['akm_account_send_remind_mail'] = array(
+    'label' => t('Send remind mail'),
+    'callback' => 'akm_account_user_operation_send_remind_mail',
+    'callback arguments' => array('bulkupdate', array('message' => TRUE)),
+  );
+  $operations['akm_account_send_new_invoice_mail'] = array(
+    'label' => t('Send new invoice'),
+    'callback arguments' => array('bulkupdate', array('message' => TRUE)),
+  );
+  return $operations;
+}
+
+/**
+ * Callback function for admin mass send remind invoice mail to users.
+ */
+function akm_account_fake_submit($accounts) {
+  $accounts = user_load_multiple($accounts);
+  foreach ($accounts as $user) {
+    $context['user'] = $user;
+    drupal_mail('gce_invoices', 'invoice_reminder_mail', $user->mail, language_default(), $context);
+    // Duplicate mail to admin.
+    $to_admin = variable_get('gce_core_site_mail_group', variable_get('site_mail', ini_get('sendmail_from')));
+    drupal_mail('gce_invoices', 'invoice_reminder_mail', $to_admin, language_default(), $context);
+    watchdog('gce_invoices', 'Reminder letter to %user sended', array('%user' => $user->name));
+  }
+}
+
+/**
+ * Callback function for admin mass send remind invoice mail to users.
+ */
+function akm_account_user_operation_send_remind_mail($accounts) {
+  $accounts = user_load_multiple($accounts);
+  foreach ($accounts as $user) {
+    $context['user'] = $user;
+    drupal_mail('gce_invoices', 'invoice_reminder_mail', $user->mail, language_default(), $context);
+    // Duplicate mail to admin.
+    $to_admin = variable_get('gce_core_site_mail_group', variable_get('site_mail', ini_get('sendmail_from')));
+    drupal_mail('gce_invoices', 'invoice_reminder_mail', $to_admin, language_default(), $context);
+    watchdog('gce_invoices', 'Reminder letter to %user sended', array('%user' => $user->name));
+  }
+}
+
+/**
+ * Implements hook_preprocess_user_profile().
+ */
+function akm_account_preprocess_user_profile(&$variables, $hook) {
+  if (!empty($variables['elements']['#account']->uid)) {
+    if ($account = user_load($variables['elements']['#account']->uid)) {
+      if ($items = field_get_items('user', $account, 'field_tour_collection')) {
+        $rows = array();
+        foreach ($items as $x => $item) {
+          $fc = field_collection_field_get_entity($item);
+          $rows[$x][] = empty($fc->field_tour[LANGUAGE_NONE][0]['taxonomy_term']->name) ? taxonomy_term_load($fc->field_tour[LANGUAGE_NONE][0]['tid'])->name : $fc->field_tour[LANGUAGE_NONE][0]['taxonomy_term']->name;
+          $rows[$x][] = empty($fc->field_tour_start_date[LANGUAGE_NONE][0]['value']) ? '' : date('d/m/Y', strtotime($fc->field_tour_start_date[LANGUAGE_NONE][0]['value']));
+          $rows[$x][] = empty($fc->field_tour_end_date[LANGUAGE_NONE][0]['value']) ? '' : date('d/m/Y', strtotime($fc->field_tour_end_date[LANGUAGE_NONE][0]['value']));
+        }
+        $header = array('City', 'From', 'To');
+        if (!empty($rows)) {
+          $variables['field_tour_collection_custom'] = theme('table', array(
+            'header' => $header,
+            'rows' => $rows,
+            'attributes' => array(
+              'id' => 'user-tours-table',
+            ),
+          ));
+        }
+      }
+    }
+  }
+}

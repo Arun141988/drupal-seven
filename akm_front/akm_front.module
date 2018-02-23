@@ -1,0 +1,195 @@
+<?php
+
+define('akm_front_SLIDER_ELEMENT', 'div#block-views-users-account-show-slider-block');
+define('akm_front_AJAX_SLIDER_CALLBACK', 'akm_front/ajax/get/');
+
+/**
+ * Implements hook_menu().
+ */
+function akm_front_menu() {
+  $items = array();
+  $items['views/ajax/autocomplete/exposed/front/%'] = array(
+    'title' => 'Exposed callback',
+    'page callback' => 'akm_front_exposed_front_autocomplete_callback',
+    'page arguments' => array(5),
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+  );
+  $items[akm_front_AJAX_SLIDER_CALLBACK . '%'] = array(
+    'title' => 'Getting slider',
+    'page callback' => 'akm_front_get_slider_ajax_callback',
+    'page arguments' => array(3),
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Ajax callback. Return the slider.
+ */
+function akm_front_get_slider_ajax_callback($arg) {
+
+  switch ($arg) {
+    case 'mobile':
+      $display = 'slider_block_mobile';
+      break;
+
+    case 'desktop':
+      $display = 'slider_block';
+      break;
+
+    default:
+      drupal_exit();
+      break;
+  }
+
+  $view = views_get_view('users_account_show');
+  $view->set_display($display);
+  $view->pre_execute();
+  $view->execute();
+  $html = $view->render();
+
+  $commands = array();
+  $commands[] = ajax_command_html(akm_front_SLIDER_ELEMENT, $html);
+
+  print ajax_render($commands);
+  drupal_exit();
+}
+
+/**
+ * Custom page callback.
+ */
+function akm_front_exposed_front_autocomplete_callback($arg, $string = '') {
+  $data = array();
+
+  // Search location.
+  $query = db_select('taxonomy_term_data', 't')
+    ->distinct()
+    ->fields('t', array('name'))
+    ->condition('t.vid', 2)
+    ->condition('t.name', '%' . $arg . '%', 'LIKE')
+    ->range(0, 10);
+  $results = $query->execute()->fetchCol();
+
+  if (!empty($results)) {
+    $data = array_combine($results, $results);
+  }
+  else {
+    // Search zip code.
+    $query = db_select('field_data_field_zipcode', 'zip')
+      ->distinct()
+      ->fields('zip', array('field_zipcode_value'))
+      ->condition('zip.field_zipcode_value', '%' . $arg . '%', 'LIKE')
+      ->range(0, 10);
+    $results = $query->execute()->fetchCol();
+
+    if (!empty($results)) {
+      $data = array_combine($results, $results);
+    }
+  }
+
+  print_r(drupal_json_output($data));
+
+  exit();
+}
+
+/**
+ * Customize exposed filters form for front page.
+ */
+function akm_front_form_views_exposed_form_alter(&$form, &$form_state) {
+  if (drupal_is_front_page()) {
+    $form['field_user_location_tid']['#autocomplete_path'] = 'views/ajax/autocomplete/exposed/front';
+    $form['field_user_location_tid']['#attributes']['placeholder'] = t('Type location or postcode');
+    array_unshift($form['#validate'], 'akm_front_overwrite_exposed_filters');
+    $form['field_zipcode_value']['#type'] = 'hidden';
+
+    $form['field_sexuality_value']['#options']['All'] = t('All Genders');
+    $form['field_enjoys_tid']['#options']['All'] = t('All Enjoys');
+    $form['field_price_from_value']['#options']['All'] = t('All Fee Ranges');
+    $form['submit']['#name'] = strtolower($form['submit']['#value']);
+  }
+  elseif (arg(0) == 'search') {
+    $form['submit']['#value'] = t('Search');
+    $form['search_api_multi_fulltext']['#attributes']['placeholder'] = t('Search');
+  }
+}
+
+/**
+ * Overwrite exposed filters.
+ */
+function akm_front_overwrite_exposed_filters($form, &$form_state) {
+  if (!empty($form_state['values']['field_user_location_tid'])) {
+    if ((int) $form_state['values']['field_user_location_tid']) {
+      $form_state['values']['field_zipcode_value'] = $form_state['values']['field_user_location_tid'];
+      $form_state['values']['field_user_location_tid'] = '';
+    }
+    else {
+      $form_state['values']['field_zipcode_value'] = '';
+    }
+  }
+}
+
+function akm_front_form_menu_edit_item_alter(&$form, &$form_state) {
+  // Detect simpe menu item.
+  if (!empty($form['link_path']['#title'])) {
+    $form['akm_front_is_item_container'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Use as container'),
+      '#default_value' => (!empty($form['options']['#value']['is_container'])) ? TRUE : FALSE,
+      '#weight' => 0,
+    );
+    $form['link_path']['#states'] = array(
+      'invisible' => array(
+        'input[name="akm_front_is_item_container"]' => array('checked' => TRUE),
+      ),
+    );
+
+    $form['link_path']['#required'] = FALSE;
+    $form['link_path']['#title'] .= ' <span class="form-required" title="This field is required.">*</span>';
+
+    array_unshift($form['#validate'], 'akm_front_menu_edit_item_custom_validate');
+    array_unshift($form['#submit'], 'akm_front_menu_edit_item_custom_submit');
+  }
+}
+
+/**
+ * Custom validation for a menu_edit_item form.
+ */
+function akm_front_menu_edit_item_custom_validate($form, &$form_state) {
+  if ($form_state['values']['akm_front_is_item_container']) {
+    $form_state['values']['link_path'] = '<front>';
+  }
+  elseif (empty($form_state['values']['link_path'])) {
+    form_set_error('link_path', t('!name field is required.', array('!name' => $form['link_path']['#title'])));
+  }
+}
+
+/**
+ * Custom submit for a menu_edit_item form.
+ */
+function akm_front_menu_edit_item_custom_submit($form, &$form_state) {
+  if ($form_state['values']['akm_front_is_item_container']) {
+    $form_state['values']['options']['is_container'] = TRUE;
+  }
+  else {
+    $form_state['values']['options']['is_container'] = FALSE;
+  }
+}
+
+/**
+ * Implements hook_process_page().
+ */
+function akm_front_process_page(&$variables) {
+  if (drupal_is_front_page()) {
+    $path = drupal_get_path('module', 'akm_front');
+    drupal_add_js($path . '/js/akm_front.js');
+    drupal_add_library('system', 'drupal.ajax');
+    drupal_add_js(array(
+      'akm_front' => array(
+        'slider_element' => akm_front_SLIDER_ELEMENT,
+        'slider_callback' => akm_front_AJAX_SLIDER_CALLBACK,
+      ),
+    ), 'setting');
+  }
+}

@@ -1,0 +1,443 @@
+<?php
+
+/**
+ * Implements hook_boot().
+ */
+function akm_popup_boot() {
+  global $base_root;
+
+  // Don't cache page if need output popup
+  if (variable_get('akm_popup_show_popup') && empty($_COOKIE['ageGateConfirm'])) { // && !empty($_COOKIE['has_js'])
+    // Disable cache.
+    $GLOBALS['conf']['cache'] = FALSE;
+
+    // Overwrite cache header.
+    header('X-Drupal-Cache: MISS');
+
+    // Re-run full bootstrap and menu handler from index.php.
+    drupal_bootstrap(DRUPAL_BOOTSTRAP_FULL, TRUE);
+
+    // Bootstrap is finished, now run menu handler from index.php.
+    menu_execute_active_handler();
+
+    // Clean this page cache.
+    cache_clear_all($base_root . request_uri(), 'cache_page');
+
+    exit;
+  }
+}
+
+/**
+ * Implements hook_menu().
+ */
+function akm_popup_menu() {
+  $items = array();
+
+  $items['admin/config/people/popup'] = array(
+    'title' => 'Popups settings',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('akm_popup_settings'),
+    'access arguments' => array('administer site configuration'),
+    'file' => 'akm_popup.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_page_build().
+ */
+function akm_popup_page_build(&$page) {
+  global $user;
+
+  // Set user is confirmed for admin.
+  if (empty($_COOKIE['ageGateConfirm']) && in_array('administrator', array_values($user->roles))) {
+    setcookie('ageGateConfirm', 1, 0, '/');
+  }
+
+  // Block popup for admin pages.
+  if (arg(0) == 'admin') {
+    return;
+  }
+
+  if (((arg(0) == 'user' && (int) arg(1)) || arg(0) == 'videos') && variable_get('akm_popup_stop_videos')) {
+    // Add youtube API library.
+    drupal_add_js('http://www.youtube.com/player_api', 'external');
+    // Add Vimeo API library.
+    drupal_add_js('https://f.vimeocdn.com/js/froogaloop2.min.js', 'external');
+    if (libraries_load('fancybox')) {
+      $akm_popup_video_message = variable_get('akm_popup_video_popup_message', array(
+        'value' => '',
+        'format' => 'filtered_html',
+      ));
+      $popup_button_link = variable_get('akm_popup_video_popup_button_link') ? variable_get('akm_popup_video_popup_button_link') : '#';
+      $page['page_bottom']['video_popup'] = array(
+        '#markup' => theme('gce_video_popup', array(
+          'popup_title' => variable_get('akm_popup_video_popup_title', ''),
+          'popup_content' => $akm_popup_video_message['value'],
+          'popup_button_text' => variable_get('akm_popup_video_popup_button_text', ''),
+          'popup_button_link' => $popup_button_link,
+        )),
+        '#attached' => array(
+          'js' => array(
+            drupal_get_path('module', 'akm_popup') . '/js/popup.js',
+            array(
+              'data' => array('gceVideoPopupTimeOffset' => variable_get('akm_popup_video_time_offset', '')),
+              'type' => 'setting',
+            ),
+          ),
+        ),
+      );
+    }
+    else {
+      watchdog('system', 'Fancybox library called but not found!', array(), WATCHDOG_ERROR);
+    }
+  }
+
+  if (variable_get('akm_popup_show_popup') && empty($_COOKIE['ageGateConfirm'])) {
+    drupal_add_library('system', 'jquery.cookie');
+    if (libraries_load('fancybox')) {
+      $akm_popup_age_gate_message = variable_get('akm_popup_message', array(
+        'value' => '',
+        'format' => 'filtered_html ',
+      ));
+      $page['page_bottom']['popup'] = array(
+        '#markup' => theme('akm_popup', array(
+          'popup_title' => variable_get('akm_popup_title', ''),
+          'popup_content' => $akm_popup_age_gate_message['value'],
+          'popup_button_text' => variable_get('akm_popup_button_text', ''),
+        )),
+        '#attached' => array(
+          'js' => array(
+            drupal_get_path('module', 'akm_popup') . '/js/popup.js',
+            array(
+              'data' => array(
+                'gcePopupTimeOffset' => variable_get('akm_popup_time_offset', ''),
+              ),
+              'type' => 'setting',
+            ),
+          ),
+        ),
+      );
+    }
+    else {
+      watchdog('system', 'Fancybox library called but not found!', array(), WATCHDOG_ERROR);
+    }
+  }
+}
+
+/**
+ * Implements hook_theme().
+ */
+function akm_popup_theme() {
+  return array(
+    'akm_popup' => array(
+      'variables' => array(
+        'popup_title' => NULL,
+        'popup_content' => NULL,
+        'popup_button_text' => NULL,
+      ),
+      'template' => 'theme/popup',
+    ),
+    'gce_video_popup' => array(
+      'variables' => array(
+        'popup_title' => NULL,
+        'popup_content' => NULL,
+        'popup_button_text' => NULL,
+        'popup_button_link' => NULL,
+      ),
+      'template' => 'theme/video-popup',
+    ),
+    'gce_relocate_button' => array(
+      'template' => 'theme/relocate-button',
+    ),
+  );
+}
+
+/**
+ * Implements hook_preprocess_html().
+ */
+function akm_popup_preprocess_html(&$variables) {
+  if (variable_get('akm_popup_ask_geolocation')) {
+    drupal_add_library('system', 'jquery.cookie');
+    drupal_add_js('https://maps.googleapis.com/maps/api/js?v=3.exp', 'external');
+    $path = drupal_get_path('module', 'akm_popup');
+    drupal_add_js($path . '/js/change-location.js');
+    $variables['header_vars']['gce_relocate_button'] = theme('gce_relocate_button');
+  }
+}
+
+/**
+ * Implements hook_init().
+ *
+ * If user have location redirect user to it.
+ */
+function akm_popup_init() {
+  $location = '';
+  if (isset($_COOKIE['gceCurrentPosition']) && !isset($_COOKIE['gceUserLocation'])) {
+    $gceCurrentPosition = (string) $_COOKIE['gceCurrentPosition'];
+    $position = json_decode($gceCurrentPosition);
+    if (is_object($position)) {
+      // Get Location!
+      $location = akm_popup_get_nearest_location();
+
+      if ($location) {
+        setcookie('gceUserLocation', $location, 0, '/');
+        drupal_goto('/', array('query' => array('field_user_location_tid' => $location)));
+      }
+    }
+  }
+}
+
+function akm_popup_get_nearest_location() {
+  $near_location = '';
+  if (isset($_COOKIE['gceCurrentPosition'])) {
+    $gceCurrentPosition = (string) $_COOKIE['gceCurrentPosition'];
+    $position = json_decode($gceCurrentPosition);
+
+    $locations = taxonomy_get_tree(2, 0, NULL, TRUE);
+
+    $geolocation = new GceGoogledistance();
+    $geolocation->get_distances($position, $locations);
+    $near_location = $geolocation->get_near_location();
+    // Get nearest top location!
+    if (!$near_location && variable_get('akm_popup_top_locations', FALSE)) {
+      $tid_top_locations = variable_get('akm_popup_top_locations', FALSE);
+      $locations = taxonomy_term_load_multiple($tid_top_locations);
+
+      $geolocation = new GceGoogledistance();
+      $geolocation->get_distances($position, $locations);
+      $near_location = $geolocation->get_near_location(TRUE);
+    }
+  }
+  return $near_location;
+}
+
+/**
+ * Add custom parameters to youtube url.
+ */
+function akm_popup_preprocess_video_embed_field_embed_code(&$variables) {
+  if ($variables['handler'] === 'youtube') {
+    // Get the handler.
+    $handler = video_embed_get_handler($variables['url']);
+    $handler['function'] = 'akm_popup_field_handle_youtube';
+    // Add api control.
+    $variables['style_settings']['enablejsapi'] = 1;
+    $variables['style_settings']['version'] = 3;
+    // Prepare embed code.
+    if ($handler && isset($handler['function']) && function_exists($handler['function'])) {
+      $embed_code = call_user_func($handler['function'], $variables['url'], $variables['style_settings']);
+      $variables['embed_code'] = drupal_render($embed_code);
+    }
+    else {
+      $variables['embed_code'] = l($variables['url'], $variables['url']);
+    }
+  }
+  elseif ($variables['handler'] === 'vimeo') {
+    // Get the handler.
+    $handler = video_embed_get_handler($variables['url']);
+    $handler['function'] = 'akm_popup_field_handle_vimeo';
+    // Prepare embed code.
+    if ($handler && isset($handler['function']) && function_exists($handler['function'])) {
+      $embed_code = call_user_func($handler['function'], $variables['url'], $variables['style_settings']);
+      $variables['embed_code'] = drupal_render($embed_code);
+    }
+    else {
+      $variables['embed_code'] = l($variables['url'], $variables['url']);
+    }
+  }
+}
+
+/**
+ * Handler for Youtube videos.
+ *
+ * @param string $url
+ *   The video URL.
+ * @param array $settings
+ *   The settings array.
+ *
+ * @return array
+ *   The video iframe render array.
+ */
+function akm_popup_field_handle_youtube($url, $settings) {
+  $output = array();
+
+  // Grab the minutes and seconds, and just convert it down to seconds.
+  preg_match('/#t=((?P<min>\d+)m)?((?P<sec>\d+)s)?/', $url, $matches);
+
+  // Give it some default data in case there is no #t=...
+  $matches += array(
+    "min" => 0,
+    "sec" => 0,
+  );
+  $time = ($matches["min"] * 60) + $matches["sec"];
+  $settings['start'] = $time;
+
+  $id = _video_embed_field_get_youtube_id($url);
+  if (!$id) {
+    // We can't decode the URL - just return the URL as a link.
+    $output['#markup'] = l($url, $url);
+    return $output;
+  }
+  // Construct the embed code.
+  $settings['wmode'] = 'opaque';
+  $settings_str = _video_embed_code_get_settings_str($settings);
+
+  $output['#markup'] = '<iframe id="' . uniqid() . '" class="youtube-iframe" width="' . check_plain($settings['width']) . '" height="' . check_plain($settings['height']) . '" src="//www.youtube.com/embed/' . $id . '?' . $settings_str . '" frameborder="0" allowfullscreen></iframe>';
+
+  return $output;
+}
+
+/**
+ * Handler for Vimeo videos.
+ *
+ * @param string $url
+ *   The video URL.
+ * @param array $settings
+ *   The settings array.
+ *
+ * @return string
+ *   The video iframe.
+ */
+function akm_popup_field_handle_vimeo($url, $settings) {
+  $vimeo_data = _video_embed_field_get_vimeo_data($url);
+
+  // Get ID of video from URL.
+  $id = _video_embed_field_get_vimeo_id($vimeo_data);
+
+  if (empty($id)) {
+    return array(
+      '#markup' => l($url, $url),
+    );
+  }
+
+  // Construct the embed code.
+  $settings['player_id'] = drupal_html_id('vimeo-' . $id);
+  if (!empty($settings['froogaloop'])) {
+    $settings['api'] = 1;
+  }
+  unset($settings['froogaloop']);
+
+  $settings_str = _video_embed_code_get_settings_str($settings);
+
+  return array(
+    '#markup' => '<iframe id="' . $settings['player_id'] . '" class="vimeo-iframe" width="' . check_plain($settings['width'])
+    . '" height="' . check_plain($settings['height']) . '" src="//player.vimeo.com/video/' . $id
+    . '?' . $settings_str . '" frameborder="0" webkitAllowFullScreen mozallowfullscreen allowfullscreen></iframe>',
+  );
+}
+
+/**
+ * Calculate distance.
+ */
+class GceGoogledistance {
+
+  public $destinceurl = 'https://maps.googleapis.com/maps/api/distancematrix/';
+  public $method = 'json';
+  public $locations = array();
+  public $curposition = array();
+
+  public function __construct() {
+
+  }
+
+  function get_distances($origin = array(), $destinations = array()) {
+    if ($this->prepare_locations($origin, $destinations)) {
+
+      if (!$this->ask_google_distance()) {
+        $this->solve_distance_expression();
+      }
+      return $this->locations;
+    }
+  }
+
+  public function get_near_location($check_in_city = FALSE) {
+    $k = 0;
+
+    foreach ($this->locations as $i => $location) {
+      if ($this->locations[$i]['distance'] && ($this->locations[$i]['distance'] < $this->locations[$k]['distance'])) {
+        $k = $i;
+      }
+    }
+
+    return ($check_in_city || $this->locations[$k]['distance'] < 25000) ? $this->locations[$k]['name'] : '';
+  }
+
+  public function ask_google_distance() {
+    $distance_found = FALSE;
+    $get_API = $this->destinceurl . $this->method . '?origins=';
+    $get_API .= round($this->curposition->latitude, 2) . ",";
+    $get_API .= round($this->curposition->longitude, 2);
+
+    $location_arr = array();
+    foreach ($this->locations as $tid => $location) {
+      $location_arr[] = round($location['lat'], 2) . ',' . round($location['lng'], 2);
+    }
+
+    $get_API .= '&destinations=';
+    $get_API .= implode('|', $location_arr);
+
+    // Get Google response.
+    $jsonfile = file_get_contents($get_API);
+
+    if ($jsonfile) {
+      $jsonarray = json_decode($jsonfile);
+
+      if (!empty($jsonarray) && isset($jsonarray->status) && $jsonarray->status == 'OK' && !empty($jsonarray->rows[0]->elements)) {
+
+        $i = 0;
+        while ($i < count($this->locations)) {
+          if ($jsonarray->rows[0]->elements[$i]->status == 'OK') {
+            $distance = $jsonarray->rows[0]->elements[$i]->distance->value;
+            $distance_found = TRUE;
+          }
+          else {
+            $distance = '';
+          }
+          $this->locations[$i]['distance'] = $distance;
+          $i++;
+        }
+      }
+      else {
+        watchdog('system', 'Google map API error. Response status: ' . $jsonarray->status, array(), WATCHDOG_ERROR);
+      }
+    }
+
+    return $distance_found;
+  }
+
+  public function solve_distance_expression() {
+    $curpos_lat = round($this->curposition->latitude, 2);
+    $curpos_lng = round($this->curposition->longitude, 2);
+    foreach ($this->locations as $i => $location) {
+      $this->locations[$i]['distance'] = $this->get_spherical_distance($curpos_lat, $curpos_lng, $location['lat'], $location['lng']);
+    }
+  }
+
+  public function get_spherical_distance($lat1, $long1, $lat2, $long2) {
+    $s_pr = deg2rad($lat1);
+    $f_pr = deg2rad($lat2);
+    $lr = deg2rad($long1 - $long2);
+
+    return round(6372795 * acos(sin($s_pr) * sin($f_pr) + cos($s_pr) * cos($f_pr) * cos($lr)));
+  }
+
+  public function prepare_locations($origin = array(), $destinations = array()) {
+
+    $this->curposition = $origin;
+
+    foreach ($destinations as $destination) {
+      if (!empty($destination->field_tax_geolocation)) {
+        $this->locations[] = array(
+          'name' => $destination->name,
+          'lat' => $destination->field_tax_geolocation[LANGUAGE_NONE][0]['lat'],
+          'lng' => $destination->field_tax_geolocation[LANGUAGE_NONE][0]['lng'],
+        );
+      }
+    }
+
+    return (empty($this->curposition) || empty($this->locations)) ? FALSE : TRUE;
+  }
+
+}

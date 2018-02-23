@@ -1,0 +1,297 @@
+<?php
+
+/**
+ * Debugging helper.
+ */
+function pa($mixed, $stop = FALSE) {
+  $ar = debug_backtrace();
+  $key = pathinfo($ar[0]['file']);
+  $key = $key['basename'] . ':' . $ar[0]['line'];
+  $print = array($key => $mixed);
+  echo '<pre>' . print_r($print, 1) . '</pre>';
+  if ($stop == 1) {
+    exit();
+  }
+}
+
+/**
+ * Logs a variable to a drupal_debug.txt in the site's temp directory.
+ *
+ * @param mixed $data
+ *   The variable to log to the drupal_debug.txt log file.
+ * @param string $label
+ *   (optional) If set, a label to output before $data in the log file.
+ *
+ * @return void|false
+ *   Empty if successful, FALSE if the log file could not be written.
+ *
+ * @see dd()
+ * @see http://drupal.org/node/314112
+ */
+function pd($data, $label = NULL, $flag = FILE_APPEND) {
+  $out = ($label ? $label . ': ' : '') . print_r($data, TRUE) . "\n";
+
+  // The temp directory does vary across multiple simpletest instances.
+  $file = file_directory_temp() . '/drupal_debug.txt';
+  if (file_put_contents($file, $out, $flag) === FALSE) {
+    drupal_set_message(t('Devel was unable to write to %file.', array('%file' => $file)), 'error');
+    return FALSE;
+  }
+}
+
+/**
+ * Custom preprocess for the view
+ */
+function akm_core_preprocess_views_view(&$vars) {
+  // Check if view locations.
+  if ($vars['name'] == 'dynamic_pages' && $vars['display_id'] == 'page_4') {
+    // Check tid in agg.
+    if ($tid = (int) arg(2)) {
+      // Check if term exist.
+      if ($term = taxonomy_term_load($tid)) {
+        // Load term and output it.
+        $term_arr = taxonomy_term_view($term);
+        $vars['footer'] = render($term_arr);
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_boot().
+ *
+ * Apply performance alter options.
+ */
+function akm_core_boot() {
+  global $user;
+  if (_akm_core_dont_preprocess_js()) {
+
+    variable_set('preprocess_js', 0);
+  }
+  else {
+    $preprocess_js_custom = intval(variable_get('preprocess_js_custom'));
+    variable_set('preprocess_js', $preprocess_js_custom);
+  }
+}
+
+/**
+ * Helper function check if need compress js.
+ */
+function _akm_core_dont_preprocess_js() {
+  global $user;
+  $is_need_preprocess_js = FALSE;
+
+  if (variable_get('noadmin_preprocess_js') && in_array('administrator', array_values($user->roles))) {
+    $is_need_preprocess_js = TRUE;
+  }
+  elseif (variable_get('ckeditor_is_detect')) {
+    $is_need_preprocess_js = TRUE;
+  }
+  elseif (arg(0) == 'videos') {
+    $is_need_preprocess_js = TRUE;
+  }
+  elseif (arg(0) == 'user' && (arg(1) == 'login' || arg(1) == 'register' || arg(1) == 'password')) {
+    $is_need_preprocess_js = TRUE;
+  }
+
+  return $is_need_preprocess_js;
+}
+
+/**
+ * Implements hook_js_alter().
+ */
+function akm_core_js_alter(&$javascript) {
+  // Clean CKeditor Detect.
+  variable_set('ckeditor_is_detect', 0);
+  $preprocess_js = (variable_get('preprocess_js', FALSE) && (!defined('MAINTENANCE_MODE') || MAINTENANCE_MODE != 'update'));
+  foreach ($javascript as $key => $value) {
+    // Detect CKeditor on page.
+    if (strrpos($key, 'ckeditor.')) {
+      variable_set('ckeditor_is_detect', 1);
+    }
+    // Move all scripts to footer.
+    if ($preprocess_js && $value['type'] != 'inline') {
+      $javascript[$key]['scope'] = 'footer';
+    }
+  }
+}
+
+/**
+ * Modify performance form. Implements hook_form_FORM_ID_alter().
+ *
+ * @param array $form
+ * @param array $form_state
+ */
+function akm_core_form_system_performance_settings_alter(&$form, &$form_state) {
+
+  $directory = 'public://';
+  $is_writable = is_dir($directory) && is_writable($directory);
+  $disabled = !$is_writable;
+
+  unset($form['bandwidth_optimization']['preprocess_js']);
+  $form['bandwidth_optimization']['preprocess_js_custom'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Aggregate JavaScript files.'),
+    '#default_value' => intval(variable_get('preprocess_js_custom', 0) && $is_writable),
+    '#disabled' => $disabled,
+  );
+  $form['bandwidth_optimization']['noadmin_preprocess_js'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Not aggregate JavaScript for admin.'),
+    '#default_value' => intval(variable_get('noadmin_preprocess_js', 0)),
+  );
+}
+
+/**
+ * Preprocesses the variables for site-map.tpl.php.
+ *
+ * @see site-map.tpl.php
+ */
+function akm_core_preprocess_site_map(&$variables) {
+  $variables['blogs'] = akm_core_site_map_blogs();
+}
+
+/**
+ * Implements hook_site_map_menu_list_alter().
+ *
+ * @see _site_map_menus().
+ */
+function akm_core_site_map_menu_list_alter(&$mids) {
+  $mids = array_reverse($mids, TRUE);
+}
+
+/**
+ * Render the latest blogs.
+ *
+ * @return string
+ *   Returns HTML string of site map for blogs.
+ */
+function akm_core_site_map_blogs() {
+  $output = '';
+  $class = array();
+  $options = array();
+
+  $title = t('Blog posts');
+
+  if (function_exists('_site_map_set_option')) {
+    _site_map_set_option($options, 'site_map_show_titles', 1, 1, 'show_titles', TRUE);
+  }
+
+  $blogs = array();
+  $query = db_select('node', 'n');
+  $query->fields('n', array('nid', 'title'));
+  $query
+    ->condition('n.type', 'article')
+    ->condition('n.status', 1)
+    ->orderBy('n.created', 'DESC');
+  $result = $query->execute()->fetchAll();
+
+  foreach ($result as $article) {
+    $blogs[] = l($article->title, 'node/' . $article->nid);
+  }
+
+  $class[] = 'site-map-box-blog';
+  $attributes = array('class' => $class);
+
+  $output .= theme('item_list', array('items' => $blogs));
+  $output = theme('site_map_box', array(
+    'title' => $title,
+    'content' => $output,
+    'attributes' => $attributes,
+    'options' => $options,
+  ));
+
+  return $output;
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function akm_core_form_system_site_information_settings_alter(&$form, &$form_state) {
+  $form['site_information']['akm_core_site_mail_group'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Admin group emails'),
+    '#default_value' => variable_get('akm_core_site_mail_group'),
+    '#description' => t('The To address in automated e-mails sent during a lot of notifications. (Use "," as delimiter for multiple values)'),
+  );
+  $form['site_information']['akm_core_site_phone'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Site phone number'),
+    '#default_value' => variable_get('akm_core_site_phone'),
+    '#description' => t('The phone number the site.'),
+  );
+  $form['#validate'][] = 'akm_core_system_site_information_settings_validate';
+}
+
+function akm_core_system_site_information_settings_validate($form, &$form_state) {
+  $values = & $form_state['values'];
+  if (!empty($values['akm_core_site_mail_group'])) {
+    $clear_emails = array();
+    $emails = explode(',', $values['akm_core_site_mail_group']);
+    if (is_array($emails)) {
+      foreach ($emails as $email) {
+        $email = trim($email);
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+          form_set_error('akm_core_site_mail_group', t('\'@email\' is not an email', array('@email' => $email)));
+        }
+        else {
+          $clear_emails[] = $email;
+        }
+      }
+    }
+    if (!empty($clear_emails)) {
+      $values['akm_core_site_mail_group'] = implode(',', $clear_emails);
+    }
+  }
+}
+
+
+/**
+ * Implements hook_token_info().
+ */
+function akm_core_token_info() {
+  $info = array();
+  // Define admin group emails.
+  $info['tokens']['site']['admin-group-emails'] = array(
+    'name' => t('Admin email groups'),
+    'description' => t('Administrative email addresses of admin groups.'),
+  );
+  $info['tokens']['site']['phone'] = array(
+    'name' => t('Phone number'),
+    'description' => t('Site phone number.'),
+  );
+  return $info;
+}
+
+/**
+ * Implements hook_tokens().
+ */
+function akm_core_tokens($type, $tokens, array $data = array(), array $options = array()) {
+  $replacements = array();
+  if ($type == 'site') {
+    foreach ($tokens as $name => $original) {
+      switch ($name) {
+        case 'admin-group-emails':
+          $replacements[$original] = variable_get('akm_core_site_mail_group');
+          break;
+
+        case 'phone':
+          $replacements[$original] = variable_get('akm_core_site_phone');
+          break;
+      }
+    }
+  }
+  return $replacements;
+}
+
+/**
+ * Implements hook_element_info_alter().
+ */
+function akm_core_widgets_element_info_alter(&$elements) {
+  if (!empty($elements['socialmedia_socialmedia-twitter-share-button']['template'])) {
+    $elements['socialmedia_socialmedia-twitter-share-button']['template'] = '<a href="http://twitter.com/[?profile_username=[socialmedia:sm-twitter_username]?]" title="Visit [?profile_username=[socialmedia:sm-twitter_username]?] on Twitter"[?link-target= target="{[socialmedia:sm-default_link_target_profile]}"?][?link-rel= rel="{[socialmedia:sm-default_link_rel_profile]}"?]><img width="16" height="16" src="[?icon-path=[socialmedia:sm-twitter_icon-path]?]" alt="Twitter icon" ></a>';
+  }
+  if (!empty($elements['socialmedia_socialmedia-facebook-share-button']['template'])) {
+    $elements['socialmedia_socialmedia-facebook-share-button']['template'] = '<a href="[?profile_url=[socialmedia:sm-facebook_url]?]" title="Visit [?profile_username=[socialmedia:sm-facebook_username]?] on Facebook"[?link-target= target="{[socialmedia:sm-default_link_target_profile]}"?][?link-rel= rel="{[socialmedia:sm-default_link_rel_profile]}"?]><img width="16" height="16" src="[?icon-path=[socialmedia:sm-facebook_icon-path]?]" alt="Facebook icon"></a>';
+  }
+}

@@ -1,0 +1,6 @@
+name = Gce ckeditor custom
+description = Helper module for ckeditor
+core = 7.x
+package = Custom modules
+
+files[] = ckeditor_custom.module

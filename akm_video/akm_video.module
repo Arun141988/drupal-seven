@@ -1,0 +1,319 @@
+<?php
+/**
+ * @file
+ * Gce video module main file.
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function akm_video_menu() {
+  $items = array();
+
+  $items['videos'] = array(
+    'title' => 'Videos',
+    'page callback' => 'akm_video_list',
+    'access arguments' => array('access content'),
+    'type' => MENU_NORMAL_ITEM,
+    'menu_name' => 'main-menu',
+  );
+
+  $items['videos/%'] = array(
+    'title' => 'Videos',
+    'title callback' => 'akm_video_page_title',
+    //'title arguments' => array('!arg' => 1),
+    'page callback' => 'akm_video_list',
+    'access arguments' => array('access content'),
+    'page arguments' => array(1),
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+function akm_video_page_title($title) {
+  $locations = _akm_video_get_locations();
+  $term_slug = arg(1);
+  $tid = (!empty($locations[$term_slug])) ? $locations[$term_slug] : '';
+  if ($tid) {
+    $term = taxonomy_term_load($tid);
+    $title = $term->name . ' ' . $title;
+  }
+  return $title;
+}
+
+/**
+ * Implement hook_theme().
+ */
+function akm_video_theme() {
+  return array(
+    'video_items' => array(
+      'variables' => array(
+        'items' => array(),
+      ),
+      'template' => 'theme/video_items',
+    ),
+  );
+}
+
+/**
+ * Implements hook_preprocess_page().
+ */
+function akm_video_preprocess_page(&$variables, $hook) {
+  if ((arg(0) == 'videos') || (arg(0) == 'user' && is_numeric(arg(1)))) {
+    drupal_add_js(drupal_get_path('module', 'akm_video') . '/js/video-resize.js');
+  }
+}
+
+/**
+ * Implements hook_token_info().
+ */
+function akm_video_token_info() {
+  $info = array();
+  // Define a new token type.
+  $info['types']['video'] = array(
+    'name' => t('Custom video tokens'),
+    'description' => t('A token type for custom video tokens.'),
+  );
+  // Define any new tokens.
+  $info['tokens']['video']['list'] = array(
+    'name' => t('List of videos'),
+    'description' => t('A token used for displaying list of videos'),
+  );
+  return $info;
+}
+
+/**
+ * Return videos.
+ */
+function akm_video_list($term_name = '') {
+
+  $per_page = 12;
+  $video_items = array();
+  $output = '';
+
+  $locations = _akm_video_get_locations();
+  // Get tid from arg.
+  $tid = (!empty($locations[$term_name])) ? $locations[$term_name] : '';
+
+  if (!$video_items = cache_get('videos_page', 'cache_page')) {
+
+    $query = db_select('field_data_field_videos', 'f');
+    $query->innerJoin('users', 'u', 'f.entity_id = u.uid');
+    $query->leftJoin('field_data_field_phone_number', 'p', 'f.entity_id = p.entity_id');
+    $query
+      ->fields('f', array('field_videos_fid'))
+      ->fields('u', array('uid', 'name'))
+      ->fields('p', array('field_phone_number_value'))
+      ->condition('f.field_videos_display', 1)
+      ->condition('f.entity_type', 'user')
+      ->condition('f.deleted', 0);
+    $video_file = $query
+      ->execute()
+      ->fetchAll();
+
+    foreach ($video_file as $video_item) {
+      if ($file = file_load($video_item->field_videos_fid)) {
+        $video_items[] = array(
+          'uid' => $video_item->uid,
+          'name' => $video_item->name,
+          'phone' => $video_item->field_phone_number_value,
+          'video' => array(
+            '#theme' => 'jw_player',
+            '#file' => $file,
+            '#preset' => 'video',
+          ),
+        );
+      }
+    }
+
+    $query = db_select('field_data_field_embed_url', 'fu');
+    $query->innerJoin('users', 'u', 'fu.entity_id = u.uid');
+    $query->leftJoin('field_data_field_phone_number', 'p', 'fu.entity_id = p.entity_id');
+    $query
+      ->fields('fu', array('field_embed_url_video_url', 'field_embed_url_video_data'))
+      ->fields('u', array('uid', 'name'))
+      ->fields('p', array('field_phone_number_value'))
+      ->condition('fu.entity_type', 'user')
+      ->condition('fu.deleted', 0);
+    $video_url = $query
+      ->execute()
+      ->fetchAll();
+
+    foreach ($video_url as $video_item) {
+      $video_items[] = array(
+        'uid' => $video_item->uid,
+        'name' => $video_item->name,
+        'phone' => $video_item->field_phone_number_value,
+        'video' => array(
+          '#theme' => 'video_embed_field_embed_code',
+          '#url' => $video_item->field_embed_url_video_url,
+          '#style' => 'normal',
+          '#video_data' => !empty($video_item->field_embed_url_video_data) ? unserialize($video_item->field_embed_url_video_data) : array(),
+        ),
+      );
+    }
+
+    $query = db_select('field_data_field_youtube_video', 'fyu');
+    $query->innerJoin('users', 'u', 'fyu.entity_id = u.uid');
+    $query->leftJoin('field_data_field_phone_number', 'p', 'fyu.entity_id = p.entity_id');
+    $query
+      ->fields('fyu', array('field_youtube_video_fid', 'field_youtube_video_video_title'))
+      ->fields('u', array('uid', 'name'))
+      ->fields('p', array('field_phone_number_value'))
+      ->condition('fyu.entity_type', 'user')
+      ->condition('fyu.deleted', 0);
+    $video_youtube_uploaded = $query
+      ->execute()
+      ->fetchAll();
+
+    foreach ($video_youtube_uploaded as $video_item) {
+      $video_items[] = array(
+        'uid' => $video_item->uid,
+        'name' => $video_item->name,
+        'phone' => $video_item->field_phone_number_value,
+        'video' => array(
+          '#theme' => 'youtube_uploader_video',
+          '#video_id' => $video_item->field_youtube_video_fid,
+          '#title' => $video_item->field_youtube_video_video_title,
+          '#player_size' => '640x360',
+        ),
+      );
+    }
+
+    // Add locations to $video_items.
+    _akm_video_add_locations($video_items);
+
+    // Random sort items.
+    shuffle($video_items);
+    cache_set('videos_page', $video_items, 'cache_page', CACHE_TEMPORARY);
+  }
+  else {
+    $video_items = $video_items->data;
+  }
+
+  // Filter items by location.
+  if ($tid) {
+    foreach ($video_items as $k => $item) {
+      if (!in_array($tid, $item['locations'])) {
+        unset($video_items[$k]);
+      }
+    }
+  }
+
+  // Initialise the pager.
+  $current_page = pager_default_initialize(count($video_items), $per_page);
+  $chunks = !empty($video_items) ? array_chunk($video_items, $per_page, TRUE) : array();
+  $chunks = !empty($chunks) ? $chunks[$current_page] : array();
+  // Show the appropriate items from the list.
+  $output .= theme('video_items', array('items' => $chunks));
+
+  // Show the pager.
+  $output .= '<div class="video-pager">' . theme('pager', array('quantity', count($video_items))) . '</div>';
+
+  return $output;
+}
+
+/**
+ * Implements hook_preprocess_HOOK().
+ */
+function akm_video_process_jw_player(&$variables) {
+  // Make player resize.
+  $variables['config']['width'] = '100%';
+  $variables['config']['aspectratio'] = '4:3';
+  unset($variables['config']['height']);
+}
+
+/**
+ * Add locations to $video_items.
+ */
+function _akm_video_add_locations(&$video_items) {
+
+  if (!empty($video_items)) {
+    $locations = array();
+    $query = db_select('field_data_field_user_location', 'l')
+      ->fields('l', array('entity_id', 'field_user_location_tid'))
+      ->condition('l.entity_type', 'user')
+      ->execute()
+      ->fetchAll();
+
+    foreach ($query as $item) {
+      $locations[$item->entity_id][] = $item->field_user_location_tid;
+    }
+
+    foreach ($video_items as $k => $video_item) {
+      $video_items[$k]['locations'] = isset($locations[$video_item['uid']]) ? $locations[$video_item['uid']] : array();
+    }
+  }
+}
+
+/**
+ * Return array of locations.
+ */
+function _akm_video_get_locations() {
+  $locations = array();
+  if (!$locations = cache_get('videos_page_locations', 'cache_page')) {
+    $locations = array();
+    $terms = db_select('taxonomy_term_data', 't')
+      ->fields('t', array('tid', 'name'))
+      ->condition('t.vid', 2)
+      ->execute()
+      ->fetchAll();
+    foreach ($terms as $term) {
+      $key = str_replace(' ', '-', strtolower($term->name));
+      $locations[$key] = $term->tid;
+    }
+
+    cache_set('videos_page_locations', $locations, 'cache_page', CACHE_TEMPORARY);
+  }
+  else {
+    $locations = $locations->data;
+  }
+
+  return $locations;
+}
+
+/**
+ * Implements hook_video_embed_handler_info().
+ */
+function akm_video_video_embed_handler_info_alter(&$handlers) {
+  $handlers['dailymotion']['function'] = 'akm_video_dailymotion_handle_video';
+  return $handlers;
+}
+
+/**
+ * This is the custom dailymotion video handler (the 'function' key from handler_info).
+ *
+ * @param string $url
+ *   the full video url
+ *
+ * @param array $settings
+ *   an associative array of this handlers settings, from the settings form
+ *
+ * @return string
+ *   the embed code for the video
+ */
+function akm_video_dailymotion_handle_video($url, $settings) {
+  if (function_exists('_video_embed_dailymotion_get_video_id')) {
+    $id = _video_embed_dailymotion_get_video_id($url);
+    if ($id) {
+      $embed = '<iframe id="dailymotion-!id" src="http://www.dailymotion.com/embed/video/!id?api=1&id=dailymotion-!id&logo=0" ' .
+        'width="!width" height="!height" allowfullscreen="!fullscreen" allowscriptaccess="always" frameborder="0"></iframe>';
+      $embed = format_string($embed, array(
+          '!id' => $id,
+          '!fullscreen' => $settings['allowfullscreen'] ? 'true' : 'false',
+          '!autoplay' => $settings['allowautoplay'] ? 'true' : 'false',
+          '!width' => $settings['width'],
+          '!height' => $settings['height'],
+          '!enableapi' => 1,
+        )
+      );
+      $video = array(
+        '#markup' => $embed,
+      );
+      return $video;
+    }
+  }
+  // Return an empty string if there is no id, so we don't have broken embeds.
+  return '';
+}

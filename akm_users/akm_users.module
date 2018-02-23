@@ -1,0 +1,388 @@
+<?php
+/**
+ * @file
+ * User invoices module main file.
+ */
+
+module_load_include('inc', 'akm_users', 'akm_users.admin');
+
+/**
+ * Implements hook_entity_info_alter().
+ */
+function akm_users_entity_info_alter(&$entity_info) {
+  $entity_info ['gce_invoices']['admin ui']['controller class'] = 'UserInvoicesUIController';
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function akm_users_form_user_profile_form_alter(&$form, &$form_state) {
+  $form['#submit'][] = 'akm_users_user_profile_form_submit';
+}
+
+/**
+ * Additional custom submit to user_profile_form().
+ */
+function akm_users_user_profile_form_submit($form, &$form_state) {
+  if (!empty($form_state['values']['current_invoice']['und'][0]['value'])) {
+    $invoice_obj = get_entity_by_hash($form_state['values']['current_invoice']['und'][0]['value']);
+    if ($invoice_obj) {
+      $fid = empty($form_state['values']['bill_scan']['und'][0]['fid']) ? 0 : $form_state['values']['bill_scan']['und'][0]['fid'];
+      // Send mail that user update bill scan.
+      if (variable_get('akm_users_update_bill_notification', FALSE) && $fid && $invoice_obj->fid_of_paid_bill != $fid) {
+        $default_to = variable_get('gce_core_site_mail_group', variable_get('site_mail', ini_get('sendmail_from')));
+        $context['user'] = user_load($invoice_obj->uid);
+        drupal_mail('akm_users', 'user_update_bill', $default_to, language_default(), $context);
+      }
+
+      $invoice_obj->fid_of_paid_bill = $fid;
+      $invoice_obj->save();
+    }
+  }
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function akm_users_form_gce_invoices_form_alter(&$form, &$form_state) {
+  $form['#submit'][] = 'akm_users_invoice_form_submit';
+}
+
+/**
+ * Additional custom submit to gce_invoices_form().
+ */
+function akm_users_invoice_form_submit($form, &$form_state) {
+  // Get user id.
+  if ($user_id = $form_state['build_info']['args'][0]->uid) {
+    $account = user_load($user_id);
+    $is_user_updated = FALSE;
+    // If user dosn't have invoice yet.
+    if (empty($account->current_invoice['und'][0]['value'])) {
+      $account->current_invoice['und'][0]['value'] = $form_state['build_info']['args'][0]->hash;
+      $is_user_updated = TRUE;
+    }
+    // Check if this current user invoice.
+    elseif ($account->current_invoice['und'][0]['value'] == $form_state['build_info']['args'][0]->hash) {
+      if (empty($form_state['values']['fid_of_paid_bill'])) {
+        $account->bill_scan = array();
+      }
+      else {
+        $fid = file_load($form_state['values']['fid_of_paid_bill']);
+        $account->bill_scan['und'][0] = (array) $fid;
+      }
+      $is_user_updated = TRUE;
+    }
+    if ($is_user_updated) {
+      user_save($account);
+    }
+
+  }
+}
+
+function akm_users_send_user_status_mail($uids = array(), $operation = '') {
+  switch ($operation) {
+    case 'add_role':
+      $key = variable_get('akm_users_approve_notification') ? 'akm_users_approve_notification' : FALSE;
+      break;
+
+    case 'remove_role':
+      $key = variable_get('akm_users_reject_notification') ? 'akm_users_reject_notification' : FALSE;
+      break;
+
+    default:
+      $key = FALSE;
+      break;
+  }
+
+  if ($key) {
+    $users = user_load_multiple($uids);
+    foreach ($users as $user) {
+      $context['user'] = $user;
+      drupal_mail('akm_users', $key, $user->mail, language_default(), $context);
+    }
+  }
+}
+
+/**
+ * Implements hook_mail().
+ */
+function akm_users_mail($key, &$message, $params) {
+  $message['headers']['Content-Type'] = 'text/html; charset=UTF-8; format=flowed';
+  switch ($key) {
+    case 'akm_users_approve_notification':
+      $message['subject'] = _akm_users_notification_text('akm_users_approve_notification_subject', NULL, $params, TRUE);
+      $message['body'][] = _akm_users_notification_text('akm_users_approve_notification_body', NULL, $params, TRUE);
+      break;
+
+    case 'akm_users_reject_notification':
+      $message['subject'] = _akm_users_notification_text('akm_users_reject_notification_subject', NULL, $params, TRUE);
+      $message['body'][] = _akm_users_notification_text('akm_users_reject_notification_body', NULL, $params, TRUE);
+      break;
+
+    case 'user_update_bill':
+      $message['subject'] = _akm_users_notification_text('akm_users_update_bill_notification_subject', NULL, $params, TRUE);
+      $message['body'][] = _akm_users_notification_text('akm_users_update_bill_notification_body', NULL, $params, TRUE);
+      break;
+
+    case 'unpublish_account':
+      $message['subject'] = _akm_users_notification_text('akm_users_unpublish_account_notification_subject', NULL, $params, TRUE);
+      $message['body'][] = _akm_users_notification_text('akm_users_unpublish_account_notification_body', NULL, $params, TRUE);
+      break;
+
+    case 'new_user_registred':
+      $message['subject'] = _akm_users_notification_text('akm_users_new_user_notification_subject', NULL, $params, TRUE);
+      $message['body'][] = _akm_users_notification_text('akm_users_new_user_notification_body', NULL, $params, TRUE);
+      break;
+
+    default:
+      break;
+  }
+}
+
+/**
+ * Implements hook_cron().
+ */
+function akm_users_cron() {
+
+  akm_users_block_unpaid_users();
+
+  akm_users_unpublish_users();
+
+  // To do
+  //akm_users_remind_unpublish_users();
+}
+
+/**
+ * Block unpaid users.
+ */
+function akm_users_block_unpaid_users() {
+
+  if (!variable_get('user_mail_status_blocked_notify', FALSE) || !variable_get('gce_invoices_block_user_after_days')) {
+    return FALSE;
+  }
+  // Get user without role 'Has a paid bill' and not paid over 21 days.
+  $date = time() - variable_get('gce_invoices_block_user_after_days', 21) * 24 * 3600;
+
+  $query = db_select('users', 'u');
+  $query->innerJoin('field_data_current_invoice', 'fdci', 'u.uid = fdci.entity_id');
+  $query->innerJoin('gce_invoices', 'gi', 'fdci.current_invoice_value = gi.hash');
+  $query->fields('u', array('uid'));
+  $query->condition('u.status', 1);
+  $query->condition('gi.expiration_date', $date, '<=');
+  $uids = $query->execute()->fetchCol();
+  $users = user_load_multiple($uids);
+  foreach ($users as $user) {
+    // Block user.
+    module_invoke_all('user_cancel', array(), $user, 'user_cancel_block');
+    _user_cancel(array(), $user, 'user_cancel_block');
+  }
+}
+
+/**
+ * Remove role Aproved user.
+ */
+function akm_users_unpublish_users() {
+
+  if (!variable_get('akm_users_unpublish_account_notification', FALSE) || !variable_get('gce_invoices_block_user_after_days')) {
+    return FALSE;
+  }
+
+  $query = db_select('users', 'u');
+  $query->innerJoin('field_data_current_invoice', 'fdci', 'u.uid = fdci.entity_id');
+  $query->innerJoin('gce_invoices', 'gi', 'fdci.current_invoice_value = gi.hash');
+  $query->fields('u', array('uid'));
+  $query->condition('u.status', 1);
+  $query->condition('gi.expiration_date', time(), '<=');
+  $query->condition('gi.expiration_date', variable_get('cron_last'), '>');
+  $uids = $query->execute()->fetchCol();
+
+  if (!empty($uids)) {
+    $users = user_load_multiple($uids);
+    foreach ($users as $user) {
+      $context['user'] = $user;
+      drupal_mail('akm_users', 'unpublish_account', $user->mail, language_default(), $context);
+      // Duplicate mail to admin.
+      $to_admin = variable_get('gce_core_site_mail_group', variable_get('site_mail', ini_get('sendmail_from')));
+      drupal_mail('akm_users', 'unpublish_account', $to_admin, language_default(), $context);
+      watchdog('akm_users', 'User with name %user was unpublshed', array('%user' => $user->name));
+    }
+  }
+}
+
+/**
+ * Remove role Aproved user.
+ */
+function akm_users_remind_unpublish_users() {
+
+  if (!variable_get('akm_users_unpublish_account_notification', FALSE)) {
+    return FALSE;
+  }
+
+  $upper_boundary = time() - variable_get('gce_invoices_day_after_remind_letter', 5) * 24 * 3600;
+  $lower_boundary = variable_get('cron_last') - variable_get('gce_invoices_day_after_remind_letter', 5) * 24 * 3600;
+
+  $query = db_select('users', 'u');
+  $query->innerJoin('field_data_current_invoice', 'fdci', 'u.uid = fdci.entity_id');
+  $query->innerJoin('gce_invoices', 'gi', 'fdci.current_invoice_value = gi.hash');
+  $query->fields('u', array('uid'));
+  $query->condition('u.status', 1);
+  $query->condition('gi.expiration_date', $upper_boundary, '<=');
+  $query->condition('gi.expiration_date', $lower_boundary, '>');
+  $uids = $query->execute()->fetchCol();
+
+  if (!empty($uids)) {
+    $users = user_load_multiple($uids);
+    foreach ($users as $user) {
+      $context['user'] = $user;
+      drupal_mail('akm_users', 'unpublish_account', $user->mail, language_default(), $context);
+      // Duplicate mail to admin.
+      $to_admin = variable_get('gce_core_site_mail_group', variable_get('site_mail', ini_get('sendmail_from')));
+      drupal_mail('akm_users', 'unpublish_account', $to_admin, language_default(), $context);
+      watchdog('akm_users', 'User with name %user was unpublshed', array('%user' => $user->name));
+    }
+  }
+}
+
+/**
+ * Implement hook_user_insert().
+ */
+function akm_users_user_insert(&$edit, $account, $category) {
+  if ($account->is_new) {
+    $context['user'] = $account;
+    $to = variable_get('gce_core_site_mail_group', variable_get('site_mail', ini_get('sendmail_from')));
+    drupal_mail('akm_users', 'new_user_registred', $to, language_default(), $context);
+  }
+}
+
+/**
+ * Implement hook_user_presave().
+ */
+function akm_users_user_presave(&$edit, $account, $category) {
+  // Assign to user choosen role.
+  if ($account->is_new) {
+    if ($rid = (int) $edit['field_account_type'][LANGUAGE_NONE][0]['value']) {
+      if ($rid != 3) {
+        $edit['roles'][$rid] = TRUE;
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_views_query_alter().
+ */
+function akm_users_views_query_alter(&$view, &$query) {
+  // Additional filter by role.
+  if ($view->name == 'dynamic_pages' || ($view->name == 'users_account_show' && $view->current_display == 'front_list')) {
+
+    $join = new views_join();
+    $join->table = 'users_roles';
+    $join->field = 'uid';
+    $join->left_table = 'users';
+    $join->left_field = 'uid';
+    $join->type = 'LEFT';
+    $join->extra = array(
+      array(
+        'field' => 'rid',
+        // Has a paid bill role.
+        'value' => 7,
+      )
+    );
+    $query->add_relationship('users_roles_filter', $join, 'node');
+
+    $filter_by_role = array(
+      array(
+        'field' => 'users_roles_filter.rid',
+        'direction' => 'DESC',
+      )
+    );
+
+    // Add filter to two position.
+    array_splice($query->orderby, 0, 0, $filter_by_role);
+  }
+}
+
+/**
+ * Implement hook_theme().
+ */
+/*
+// To do html wrapper for mail
+function akm_users_theme() {
+  return array(
+    'user_invoice_mail' => array(
+      'variables' => array(
+        'subject' => NULL,
+        'body' => NULL,
+      ),
+      'template' => 'invoice_mail',
+      'path' => drupal_get_path('module', 'gce_invoices') . '/theme'
+    ),
+  );
+}*/
+
+/**
+ * Provides a controller for building an entity overview form.
+ */
+class UserInvoicesUIController extends InvoicesUIController {
+  public function overviewForm($form, &$form_state) {
+
+    $form['pager'] = array('#theme' => 'pager');
+
+    $this->addEntityFilterForm($form, $form_state);
+
+    $form['operations'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Bulk operations'),
+    );
+    $form['operations']['actions'] = array(
+      '#type' => 'actions',
+      '#attributes' => array('class' => array('container-inline')),
+    );
+    $form['operations']['actions']['operation'] = array(
+      '#type' => 'select',
+      '#options' => array(
+        '' => t('Select operation'),
+        'add_role' => t('Confirm payments'),
+        'remove_role' => t('Reject payments'),
+      ),
+    );
+    $form['operations']['actions']['submit'] = array(
+      '#type' => 'submit',
+      '#value' => t('Update'),
+    );
+
+    $form['entities'] = array(
+      '#type' => 'tableselect',
+      '#header' => $this->overviewTableHeaders(),
+      '#options' => $this->overviewTable(),
+      '#empty' => t('There are no invoices.'),
+    );
+
+    return $form;
+  }
+
+  public function overviewFormSubmit($form, &$form_state) {
+
+    parent::overviewFormSubmit($form, $form_state);
+
+    $operation = $form_state['values']['operation'];
+    $iids = array_filter($form_state['values']['entities']);
+    if ($operation && !empty($iids)) {
+      $uids = db_select(GCE_INVOICES_BASE_TABLE, 'inv')
+        ->distinct()
+        ->fields('inv', array('uid'))
+        ->condition('inv.iid', $iids, 'IN')
+        // Get only not expired invoices.
+        ->condition('inv.expiration_date', time(), '>')
+        ->execute()
+        ->fetchCol();
+
+      $role = user_role_load_by_name('Has a paid bill');
+      if (!empty($uids) && !empty($role->rid)) {
+        user_multiple_role_edit($uids, $operation, $role->rid);
+        akm_users_send_user_status_mail($uids, $operation);
+      }
+    }
+  }
+
+}

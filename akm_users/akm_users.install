@@ -1,0 +1,108 @@
+<?php
+/**
+ * @file
+ * Install, update and uninstall functions for the akm_users module.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function akm_users_install() {
+
+  // Create approve role 
+  $role = new stdClass();
+  $role->name = 'Has a paid bill';
+  user_role_save($role);
+
+
+  // Creating all fields added to user content type
+  foreach (_akm_users_installed_fields() as $field) {
+    if (!field_info_field($field['field_name'])) {
+      field_create_field($field);
+    }
+    else {
+      watchdog('akm_users', t('!field_name already exists.', array('!field_name' => $field['field_name'])));
+    }
+  }
+
+  // Creating all custom fields for user
+  foreach (_akm_users_installed_instances() as $instance) {
+    $instance['entity_type'] = 'user';
+    $instance['bundle'] = 'user';
+    field_create_instance($instance);
+    watchdog('akm_users', t('!field_name was added to !entity entity successfully.', array(
+      '!field_name' => $instance['field_name'],
+      '!entity' => $instance['entity_type']
+    )));
+  }
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function akm_users_uninstall() {
+
+  // Remove approve role
+  $role = 'Has a paid bill';
+  user_role_delete($role);
+
+
+  // Delete added fields
+  foreach (array_keys(_akm_users_installed_fields()) as $field) {
+    field_delete_field($field);
+  }
+  field_purge_batch(1000);
+
+  db_delete('variable')->condition('name', 'akm_users_%', 'LIKE')->execute();
+  cache_clear_all('variables', 'cache_bootstrap');
+}
+
+function _akm_users_installed_fields() {
+  $t = get_t();
+  $fields['bill_scan'] = array(
+    'field_name' => 'bill_scan',
+    'label' => $t('Add an image of your paid bill'),
+    'type' => 'image',
+  );
+  $fields['current_invoice'] = array(
+    'field_name' => 'current_invoice',
+    'label' => $t('User current invoice hash'),
+    'type' => 'text',
+    'settings' => array(
+      'max_length' => 32,
+    ),
+  );
+  return $fields;
+}
+
+function _akm_users_installed_instances() {
+  $t = get_t();
+  $instances['bill_scan'] = array(
+    'field_name' => 'bill_scan',
+    'label' => $t('Add an image of your paid bill'),
+    'widget' => array(
+      'type' => 'image_image',
+    ),
+    'formatter' => array(
+      'label' => t('label'),
+      'format' => 'image'
+    ),
+    'settings' => array(
+      'file_directory' => 'bills', // save inside "public://bills"
+      'max_filesize' => '2M',
+      'preview_image_style' => 'thumbnail',
+      'title_field' => FALSE,
+      'alt_field' => FALSE,
+    )
+  );
+  $instances['current_invoice'] = array(
+    'field_name' => 'current_invoice',
+    'label' => $t('User current invoice hash'),
+    'display' => array(
+      'default' => array(
+        'type' => 'hidden', // optional. I want to hide it
+      ),
+    ),
+  );
+  return $instances;
+}

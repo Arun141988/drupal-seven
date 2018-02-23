@@ -1,0 +1,7 @@
+name = agent
+description = this module use for agent profile(Application listing & Add new Application) 
+core = 7.x
+package = z
+dependencies[] = application
+dependencies[] = countries
+dependencies[] = nationalities

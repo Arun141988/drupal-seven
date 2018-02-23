@@ -1,0 +1,6 @@
+name = AKM account
+description = Helper module for user profile
+core = 7.x
+package = Custom modules
+
+files[] = akm_account.module

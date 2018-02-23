@@ -1,0 +1,13 @@
+<?php
+/**
+ * @file
+ * Install, update and uninstall functions for the akm_account module.
+ */
+
+/**
+ * Implements hook_uninstall().
+ */
+function akm_account_uninstall() {
+  db_delete('variable')->condition('name', 'akm_account_%', 'LIKE')->execute();
+  cache_clear_all('variables', 'cache_bootstrap');
+}

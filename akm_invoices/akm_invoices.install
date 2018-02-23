@@ -1,0 +1,167 @@
+<?php
+/**
+ * @file
+ * Install, update and uninstall functions for the akm_invoices module.
+ */
+
+
+/**
+ * Implements hook_uninstall().
+ */
+function akm_invoices_install() {
+  // Creating all fields added to user content type
+  foreach (_akm_invoices_installed_fields() as $field) {
+    if (!field_info_field($field['field_name'])) {
+      field_create_field($field);
+    }
+    else {
+      watchdog('gce_users', t('!field_name already exists.', array('!field_name' => $field['field_name'])));
+    }
+  }
+
+  // Creating all custom fields for user
+  foreach (_akm_invoices_installed_instances() as $instance) {
+    $instance['entity_type'] = 'user';
+    $instance['bundle'] = 'user';
+    field_create_instance($instance);
+    watchdog('gce_users', t('!field_name was added to !entity entity successfully.', array(
+      '!field_name' => $instance['field_name'],
+      '!entity' => $instance['entity_type']
+    )));
+  }
+}
+
+
+/**
+ * Implements hook_uninstall().
+ */
+function akm_invoices_uninstall() {
+  // Delete added fields for instances
+  foreach (array_keys(_akm_invoices_installed_fields()) as $field) {
+    field_delete_field($field);
+  }
+  field_purge_batch(1000);
+
+
+  db_delete('variable')->condition('name', 'akm_invoices_%', 'LIKE')->execute();
+  cache_clear_all('variables', 'cache_bootstrap');
+}
+
+function _akm_invoices_installed_fields() {
+  $t = get_t();
+  $fields['featured_account'] = array(
+    'field_name' => 'featured_account',
+    'label' => $t('Featured account'),
+    'type' => 'list_boolean',
+    'cardinality' => 1,
+    'settings' => array(
+      'allowed_values' => array(
+        0 => '',
+        1 => $t('Do my advertise feautured'),
+      )
+    ),
+  );
+  return $fields;
+}
+
+function _akm_invoices_installed_instances() {
+  $t = get_t();
+  $instances['featured_account'] = array(
+    'field_name' => 'featured_account',
+    'label' => $t('Featured account'),
+    'widget' => array(
+      'type' => 'options_onoff',
+    ),
+    'display' => array(
+      'default' => array(
+        'type' => 'hidden', // optional. I want to hide it
+      ),
+    ),
+  );
+  return $instances;
+}
+
+/**
+ * Implements hook_schema().
+ */
+function akm_invoices_schema() {
+  $schema['akm_invoices'] = array(
+    'fields' => array(
+      'iid' => array(
+        'description' => 'Invoice ID',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'uid' => array(
+        'description' => 'User ID',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'user_name' => array(
+        'description' => 'User name',
+        'type' => 'varchar',
+        'length' => 60,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'user_email' => array(
+        'description' => 'User email',
+        'type' => 'varchar',
+        'length' => 60,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'start_date' => array(
+        'description' => 'Invoice start date',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0
+      ),
+      'stop_date' => array(
+        'description' => 'Invoice stop date',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0
+      ),
+      'expiration_date' => array(
+        'description' => 'Invoice expiration date',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0
+      ),
+      'subsripion_type' => array(
+        'description' => 'Invoice subscription type',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'invoice_price' => array(
+        'description' => 'Invoice price',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'hash' => array(
+        'description' => 'Unique hash',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'fid_of_paid_bill' => array(
+        'description' => 'Paid bill',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('iid'),
+  );
+
+  return $schema;
+}

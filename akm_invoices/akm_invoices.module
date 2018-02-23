@@ -1,0 +1,629 @@
+<?php
+/**
+ * @file
+ * Invoices for advertising module main file.
+ */
+
+/**
+ * The module base table.
+ */
+define('akm_invoices_BASE_TABLE', 'akm_invoices');
+
+/**
+ * Define entity type.
+ */
+define('akm_invoices_ENTITY_TYPE', 'akm_invoices');
+
+/**
+ * Root path to invoice.
+ */
+define('akm_invoices_PATH', 'admin/content/invoices');
+
+module_load_include('inc', 'akm_invoices', 'akm_invoices.entity');
+
+/**
+ * Implements hook_menu().
+ */
+function akm_invoices_menu() {
+  $items = array();
+
+  $items['admin/config/people/gce-invoices'] = array(
+    'title' => 'Invoices settings',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('akm_invoices_settings'),
+    'access arguments' => array('administer site configuration'),
+    'file' => 'akm_invoices.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['user/invoices/view/%'] = array(
+    'title' => 'View invoice',
+    'description' => 'View the user invoice',
+    'type' => MENU_CALLBACK,
+    'page callback' => 'akm_invoices_get_invoise',
+    'access arguments' => array('access user profiles'),
+    'page arguments' => array(3),
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_entity_info().
+ */
+function akm_invoices_entity_info() {
+  return array(
+    'akm_invoices' => array(
+      'label' => t('Invoices'),
+      'entity class' => 'Entity',
+      'controller class' => 'EntityAPIController',
+      'views controller class' => 'EntityDefaultViewsController',
+      'base table' => akm_invoices_BASE_TABLE,
+      'entity keys' => array(
+        'id' => 'iid',
+      ),
+      'admin ui' => array(
+        'path' => akm_invoices_PATH,
+        'controller class' => 'InvoicesUIController',
+      ),
+      'access callback' => 'akm_invoices_access',
+      'module' => 'akm_invoices',
+    ),
+  );
+}
+
+
+/**
+ * Implements access.
+ */
+function akm_invoices_access($op, $entity, $account = NULL, $entity_type = 'akm_invoices') {
+  return user_access('administer site configuration');
+}
+
+/**
+ * Implement hook_theme().
+ */
+function akm_invoices_theme() {
+  // If need to do
+  /*$items['invoice_mail'] = array(
+    'variables' => array(
+      'subject' => NULL,
+      'body' => NULL,
+    ),
+    'template' => 'invoice_mail',
+    'path' => drupal_get_path('module', 'akm_invoices') . '/theme'
+  );*/
+  $items['invoice'] = array(
+    'variables' => array(
+      'user_name' => NULL,
+      'user_email' => NULL,
+      'start_date' => NULL,
+      'stop_date' => NULL,
+      'expiration_date' => NULL,
+      'subsripion_type' => NULL,
+      'invoice_price' => NULL,
+      'invoice_number' => NULL,
+    ),
+    'template' => 'invoice',
+    'path' => drupal_get_path('module', 'akm_invoices') . '/theme'
+  );
+
+  return $items;
+}
+
+/**
+ * Return fields of akm_invoices table.
+ *
+ * Return array() of table fields.
+ */
+function akm_invoices_get_table_fields() {
+  $fields = & drupal_static(__FUNCTION__, NULL);
+
+  if (!isset($fields)) {
+    module_load_include('install', 'akm_invoices', 'akm_invoices');
+    $schema = akm_invoices_schema();
+    $fields = $schema['akm_invoices']['fields'];
+  }
+
+  return $fields;
+}
+
+/**
+ * Convert invoice format date
+ *
+ * @param $date
+ * Timestamp or formatted date
+ * @param $format_date
+ * (optional) Can be 'short', 'medium', 'long', 'custom' or 'timestamp'.
+ * If $type is 'custom', a PHP date format string suitable for
+ * input to date(). if 'short', 'medium', 'long' see format_date().
+ * If 'timestamp' retun timestamp of date.
+ * return string Formated date or timestamp
+ */
+function akm_invoices_formatted_date($date, $format_date = 'medium') {
+  if ($format_date == 'timestamp') {
+    return strtotime($date);
+  }
+  else {
+    return format_date($date, $format_date, variable_get('akm_invoices_date_format', 'd-m-Y'));
+  }
+  return '';
+}
+
+/**
+ * Get invoice by hash.
+ *
+ * @param string $hash Hash string of invoice.
+ * @return obj|bool Object of invoice or FALSE.
+ */
+function get_entity_by_hash($hash = '') {
+  if ($hash) {
+    $query = new EntityFieldQuery();
+    $query->entityCondition('entity_type', akm_invoices_ENTITY_TYPE);
+    $query->propertyCondition('hash', $hash);
+    $results = $query->execute();
+    $ids = isset($results[akm_invoices_ENTITY_TYPE]) ? array_keys($results[akm_invoices_ENTITY_TYPE]) : array();
+    if ($id = array_shift($ids)) {
+      $entiy_type = akm_invoices_ENTITY_TYPE;
+      $entiy = entity_load($entiy_type, array($id));
+      return array_shift($entiy);
+    }
+    return FALSE;
+  }
+  return FALSE;
+}
+
+/**
+ * Return pdf invoice.
+ */
+function akm_invoices_get_invoise($hash = '') {
+
+  if ($hash && 32 == strlen($hash)) {
+    if ($invoice = get_entity_by_hash($hash)) {
+      $invoice_number = $invoice->user_name . '_' . date('d_m_y', $invoice->start_date);
+      $template_variables = array(
+        'user_name' => $invoice->user_name,
+        'user_email' => $invoice->user_email,
+        'start_date' => akm_invoices_formatted_date($invoice->start_date),
+        'stop_date' => akm_invoices_formatted_date($invoice->expiration_date),
+        'expiration_date' => akm_invoices_formatted_date($invoice->expiration_date),
+        'subsripion_type' => $invoice->subsripion_type,
+        'invoice_price' => $invoice->invoice_price,
+        'invoice_number' => $invoice_number,
+      );
+
+      libraries_load('dompdf');
+      $dompdf = new DOMPDF();
+      $dompdf->load_html(theme('invoice', $template_variables));
+      $dompdf->set_paper('A4');
+      $dompdf->render();
+      $dompdf->stream($invoice_number . '.pdf');
+      die();
+    }
+  }
+  drupal_goto('<front>');
+}
+
+
+/**
+ * Implements hook_libraries_info().
+ */
+function akm_invoices_libraries_info() {
+  $libraries['dompdf'] = array(
+    'name' => 'dompdf',
+    'vendor url' => 'https://github.com/dompdf/dompdfr',
+    'download url' => 'https://github.com/dompdf/dompdf',
+    'version' => '0.6.0',
+    'files' => array(
+      'php' => array('dompdf_config.inc.php'),
+    ),
+  );
+
+  return $libraries;
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ *
+ * Modify Account settings.
+ */
+function akm_invoices_form_user_admin_settings_alter(&$form, &$form_state) {
+  $form['email_new_invoice'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('New invoice created'),
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+    '#description' => t('Enable and edit e-mail messages sent to users when new invoice are created. The list of available tokens that can be used in e-mails is provided below.'),
+    '#group' => 'email',
+  );
+  $form['email_new_invoice']['akm_invoices_new_invoice_notification'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Notify user when new invoice is created.'),
+    '#default_value' => variable_get('akm_invoices_new_invoice_notification', FALSE),
+  );
+  $form['email_new_invoice']['settings'] = array(
+    '#type' => 'container',
+    '#states' => array(
+      'invisible' => array(
+        'input[name="akm_invoices_new_invoice_notification"]' => array('checked' => FALSE),
+      ),
+    ),
+  );
+  $form['email_new_invoice']['settings']['akm_invoices_new_invoice_notification_subject'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Subject'),
+    '#default_value' => _akm_invoices_notification_mail_text('akm_invoices_new_invoice_notification_subject', NULL, array(), FALSE),
+    '#maxlength' => 180,
+  );
+  $form['email_new_invoice']['settings']['akm_invoices_new_invoice_notification_body'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Body'),
+    '#default_value' => _akm_invoices_notification_mail_text('akm_invoices_new_invoice_notification_body', NULL, array(), FALSE),
+    '#rows' => 8,
+  );
+
+  $form['email_remind_letter'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Reminder letter'),
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+    '#description' => t('Enable and edit e-mail messages sent to users as reminder. The list of available tokens that can be used in e-mails is provided below.'),
+    '#group' => 'email',
+  );
+  $form['email_remind_letter']['akm_invoices_remind_letter_notification'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Remind user that invoice not paid yet.'),
+    '#default_value' => variable_get('akm_invoices_remind_letter_notification', FALSE),
+  );
+  $form['email_remind_letter']['settings'] = array(
+    '#type' => 'container',
+    '#states' => array(
+      'invisible' => array(
+        'input[name="akm_invoices_remind_letter_notification"]' => array('checked' => FALSE),
+      ),
+    ),
+  );
+  $form['email_remind_letter']['settings']['akm_invoices_remind_letter_notification_subject'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Subject'),
+    '#default_value' => _akm_invoices_notification_mail_text('akm_invoices_remind_letter_notification_subject', NULL, array(), FALSE),
+    '#maxlength' => 180,
+  );
+  $form['email_remind_letter']['settings']['akm_invoices_remind_letter_notification_body'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Body'),
+    '#default_value' => _akm_invoices_notification_mail_text('akm_invoices_remind_letter_notification_body', NULL, array(), FALSE),
+    '#rows' => 8,
+  );
+}
+
+/**
+ * Implements hook_mail().
+ */
+function akm_invoices_mail($key, &$message, $params) {
+  $message['headers']['Content-Type'] = 'text/html; charset=UTF-8; format=flowed';
+  switch ($key) {
+    case 'new_invoice_mail':
+      $subject = _akm_invoices_notification_mail_text('akm_invoices_new_invoice_notification_subject', NULL, $params);
+      $body = _akm_invoices_notification_mail_text('akm_invoices_new_invoice_notification_body', NULL, $params);
+      break;
+
+    case 'invoice_reminder_mail':
+      $subject = _akm_invoices_notification_mail_text('akm_invoices_remind_letter_notification_subject', NULL, $params);
+      $body = _akm_invoices_notification_mail_text('akm_invoices_remind_letter_notification_body', NULL, $params);
+      break;
+
+    default:
+      $subject = '';
+      $body = '';
+      break;
+  }
+  $message['subject'] = $subject;
+  $message['body'][] = $body;
+  // To do maybe
+  /*$message['body'][] = theme('invoice_mail', array(
+    'subject' => $subject,
+    'body' => $body,
+  ));*/
+}
+
+/**
+ * Returns a mail string for a variable name.
+ *
+ * Used by akm_invoices_mail() and the settings forms to retrieve strings.
+ */
+function _akm_invoices_notification_mail_text($key, $language = NULL, $variables = array(), $replace = TRUE) {
+  $langcode = isset($language) ? $language->language : NULL;
+
+  if ($admin_setting = variable_get($key, '')) {
+    // An admin setting overrides the default string.
+    $text = $admin_setting;
+  }
+  else {
+    // No override, return default string.
+    switch ($key) {
+      case 'akm_invoices_new_invoice_notification_subject':
+        $text = t('New invoice for [user:name] at [site:name]', array(), array('langcode' => $langcode));
+        break;
+
+      case 'akm_invoices_new_invoice_notification_body':
+        $text = t('[user:name],
+
+Your have new invoice <a href="[site:url]user/invoices/view/[user:current_invoice]">[site:url]user/invoices/view/[user:current_invoice]</a> on [site:name].
+
+--  [site:name] team', array(), array('langcode' => $langcode));
+        break;
+
+      case 'akm_invoices_remind_letter_notification_subject':
+        $text = t('Reminder letter for [user:name] at [site:name]', array(), array('langcode' => $langcode));
+        break;
+
+      case 'akm_invoices_remind_letter_notification_body':
+        $text = t('[user:name],
+
+You should pay an invoice <a href="[site:url]user/invoices/view/[user:current-invoice]">[site:url]user/invoices/view/[user:current-invoice]</a> on [site:name].
+Otherwise your advertising will be unpublish!
+
+--  [site:name] team', array(), array('langcode' => $langcode));
+        break;
+
+      default:
+        $text = '';
+        break;
+    }
+  }
+
+  if ($replace) {
+    // We do not sanitize the token replacement, since the output of this
+    // replacement is intended for an e-mail message, not a web browser.
+    return token_replace($text, $variables, array('language' => $language, 'sanitize' => FALSE, 'clear' => TRUE));
+  }
+
+  return $text;
+}
+
+function akm_invoices_get_new_invoice($user, $edit = array()) {
+
+  $entity_fields = akm_invoices_get_table_fields();
+
+  // Get clean invoice with default values.
+  $invoice_fields = array();
+  foreach ($entity_fields as $key => $value) {
+    if ($value['type'] != 'serial') {
+      $invoice_fields[$key] = isset($value['default']) ? $value['default'] : NULL;
+    }
+  }
+
+  // Fill invoice.
+  $hash = md5(uniqid(rand(), 1));
+
+  if (empty($user->featured_account['und'][0]['value'])) {
+    $subsripion_type = 'simple';
+  }
+  else {
+    $subsripion_type = 'featured';
+  }
+
+  $user_clear_roles = akm_invoices_get_user_clear_roles($user);
+  $array_keys = array_keys($user_clear_roles);
+  $rid = array_shift($array_keys);
+  $slug = 'akm_invoices_rid_' . $rid . '_price';
+
+  if (!empty($edit['featured_account']['und'][0]['value']) || !empty($user->featured_account['und'][0]['value'])) {
+    $is_feautured = TRUE;
+  }
+  else {
+    $is_feautured = FALSE;
+  }
+
+  if ($rid == 4 && $is_feautured) {
+    $invoice_price = variable_get('akm_invoices_feature_invoice_price', '');
+  }
+  else {
+    $invoice_price = variable_get($slug, '');
+  }
+
+  $data = array(
+    'uid' => $user->uid,
+    'user_name' => $user->name,
+    'user_email' => $user->mail,
+    'start_date' => time(),
+    'stop_date' => strtotime("+1 month"),
+    'expiration_date' => strtotime("+1 month"),
+    'subsripion_type' => $subsripion_type,
+    'invoice_price' => $invoice_price,
+    'hash' => $hash,
+  );
+
+  $new_invoice_data = $data + $invoice_fields;
+  $entity_type = akm_invoices_ENTITY_TYPE;
+  $entity = entity_create($entity_type, $new_invoice_data);
+  if ($entity->save()) {
+    return $hash;
+  }
+  else {
+    return NULL;
+  }
+}
+
+/**
+ * Implements hook_cron().
+ */
+function akm_invoices_cron() {
+
+  akm_invoices_check_sending_remind_letters();
+
+  akm_invoices_check_sending_generate_new_invoices();
+
+}
+
+/**
+ * Send remind letters to users.
+ */
+function akm_invoices_check_sending_remind_letters() {
+
+  if (!variable_get('akm_invoices_remind_letter_notification', FALSE)) {
+    return FALSE;
+  }
+
+  $role = user_role_load_by_name('Has a paid bill');
+
+  $upper_boundary = time() + variable_get('akm_invoices_day_before_remind_letter', 5) * 24 * 3600;
+  $lower_boundary = variable_get('cron_last') + variable_get('akm_invoices_day_before_remind_letter', 5) * 24 * 3600;
+  // Get users who need to send reminder letter.
+  $query = db_select('users', 'u');
+  $query->innerJoin('field_data_current_invoice', 'fdci', 'u.uid = fdci.entity_id');
+  $query->innerJoin('akm_invoices', 'gi', 'fdci.current_invoice_value = gi.hash');
+  $query->fields('u', array('uid'));
+  $query->condition('u.status', 1);
+  $query->condition('gi.expiration_date', $upper_boundary, '<=');
+  $query->condition('gi.expiration_date', $lower_boundary, '>');
+  $uids = $query->execute()->fetchCol();
+  $users = user_load_multiple($uids);
+
+  foreach ($users as $user) {
+    // Send remind mail only unaproved users.
+    if (!user_has_role($role->rid, $user)) {
+      $context['user'] = $user;
+      drupal_mail('akm_invoices', 'invoice_reminder_mail', $user->mail, language_default(), $context);
+      // Duplicate mail to .
+      $to_admin = variable_get('gce_core_site_mail_group', variable_get('site_mail', ini_get('sendmail_from')));
+      drupal_mail('akm_invoices', 'invoice_reminder_mail', $to_admin, language_default(), $context);
+      watchdog('akm_invoices', 'Reminder letter to %user sended', array('%user' => $user->name));
+    }
+  }
+}
+
+/**
+ * Generate new invoices to users.
+ */
+function akm_invoices_check_sending_generate_new_invoices() {
+
+  if (!variable_get('akm_invoices_new_invoice_notification', FALSE)) {
+    return FALSE;
+  }
+  $role = user_role_load_by_name('Has a paid bill');
+  // Get users with expired invoices.
+  $query = db_select('users', 'u');
+  $query->innerJoin('field_data_current_invoice', 'fdci', 'u.uid = fdci.entity_id');
+  $query->innerJoin('akm_invoices', 'gi', 'fdci.current_invoice_value = gi.hash');
+  $query->fields('u', array('uid'));
+  $query->condition('u.status', 1);
+  $query->condition('gi.expiration_date', time(), '<=');
+  $uids = $query->execute()->fetchCol();
+  $users = user_load_multiple($uids);
+  foreach ($users as $user) {
+    // Generate invoice only for approved users.
+    if (user_has_role($role->rid, $user)) {
+      if ($current_invoice = akm_invoices_get_new_invoice($user)) {
+        // Update invoice.
+        $user->current_invoice['und'][0]['value'] = $current_invoice;
+        $user->current_invoice['und'][0]['safe_value'] = $current_invoice;
+        // Delete bill scan.
+        $user->bill_scan = array();
+
+        // Save user and send mail.
+        if ($updated_user = user_save($user)) {
+          $context['user'] = $updated_user;
+          drupal_mail('akm_invoices', 'new_invoice_mail', $user->mail, language_default(), $context);
+          // Duplicate mail to admin.
+          $to_admin = variable_get('gce_core_site_mail_group', variable_get('site_mail', ini_get('sendmail_from')));
+          drupal_mail('akm_invoices', 'new_invoice_mail', $to_admin, language_default(), $context);
+          watchdog('akm_invoices', 'New invoise to %user sended with hash %currinvoice.', array(
+            '%user' => $user->name,
+            '%currinvoice' => $current_invoice,
+          ));
+        }
+      }
+    }
+  }
+}
+
+function akm_invoices_user_presave(&$edit, $account, $category) {
+  // This is new user first time edit own account.
+  if (!$account->is_new && $account->status && isset($edit['current_invoice']) && empty($edit['current_invoice']['und'][0]['value'])) {
+    if ($current_invoice = akm_invoices_get_new_invoice($account, $edit)) {
+      $edit['current_invoice']['und'][0]['value'] = $current_invoice;
+      $account->current_invoice['und'][0]['value'] = $current_invoice;
+      $account->current_invoice['und'][0]['safe_value'] = $current_invoice;
+      $context['user'] = $account;
+      drupal_mail('akm_invoices', 'new_invoice_mail', $account->mail, language_default(), $context);
+      // Duplicate mail to admin.
+      $to_admin = variable_get('gce_core_site_mail_group', variable_get('site_mail', ini_get('sendmail_from')));
+      drupal_mail('akm_invoices', 'new_invoice_mail', $to_admin, language_default(), $context);
+      watchdog('akm_invoices', 'New invoise to %user sended with hash %currinvoice.', array(
+        '%user' => $account->name,
+        '%currinvoice' => $current_invoice,
+      ));
+    }
+  }
+}
+
+/**
+ * Return filtred roles.
+ */
+function akm_invoices_get_clear_roles() {
+  $roles = user_roles();
+  foreach ($roles as $rid => $role_name) {
+    // Remome follow roles anonymous user, authenticated user, administrator, Has a paid bill.
+    if (in_array($rid, array(1, 2, 3, 7))) {
+      unset($roles[$rid]);
+    }
+  }
+  return $roles;
+}
+
+/**
+ * Return usser filterd roles.
+ */
+function akm_invoices_get_user_clear_roles($user) {
+  $clear_roles = array();
+  if (isset($user->roles)) {
+    $clear_roles = $user->roles;
+    foreach ($clear_roles as $rid => $role_name) {
+      // Remome follow roles anonymous user, authenticated user, administrator, Has a paid bill.
+      if (in_array($rid, array(1, 2, 3, 7))) {
+        unset($clear_roles[$rid]);
+      }
+    }
+  }
+  return $clear_roles;
+}
+
+// Test call.
+function akm_invoices_init() {
+  // Cron emulator
+  /*if (time() > variable_get('cron_example_next_execution', 0)) {
+    drupal_cron_run();
+    variable_set('cron_example_next_execution', time() + 360);
+  }*/
+
+  // invoice generator 
+  /*if('gce-invoices' == arg(3)){
+
+    $query = db_select('users', 'u');
+    $query->fields('u', array('uid','name', 'mail'));
+    $query->condition('u.uid', 0, '<>');
+    $result = $query->execute();
+    while($user = $result->fetchAssoc()) {  
+    $rand_start = time() + rand(1, 1209600) - 604800;
+    $rand_stop = $rand_start + 2592000;
+    $subsripion_type = array_rand(array('simple' => '', 'featured' => ''));
+    $data = array(
+      'uid' => $user['uid'],
+      'user_name' => $user['name'],
+      'user_email' => $user['mail'],
+      'start_date' => $rand_start,
+      'stop_date' => $rand_stop,
+      'expiration_date' => $rand_stop,
+      'subsripion_type' => $subsripion_type,
+      'invoice_price' => $subsripion_type == 'simple' ? variable_get('akm_invoices_simple_invoice_price') : variable_get('akm_invoices_feature_invoice_price'),
+      'hash' => md5(uniqid(rand(),1)),
+      'fid_of_paid_bill' => 0,
+    );
+
+    $entity = entity_create('akm_invoices', $data);
+    $entity->save(); 
+    }
+  }*/
+}

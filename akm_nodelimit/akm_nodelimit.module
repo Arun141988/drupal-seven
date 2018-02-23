@@ -1,0 +1,35 @@
+<?php
+/**
+ * @file
+ * Limit nodes for Escort user module main file.
+ */
+
+/**
+ * Implements hook_menu_alter().
+ */
+function akm_nodelimit_menu_alter(&$items) {
+  if (isset($items['node/add/adult-relax'])) {
+    $items['node/add/adult-relax']['page callback'] = 'akm_nodelimit_node_add';
+  }
+}
+
+function akm_nodelimit_node_add($type) {
+  global $user;
+  // Apply rule for all users excluding admin.
+  $adult_relax_limit = 1;
+  $role = 'Escort';
+
+  $nodes_count = db_select('node', 'n')
+    ->condition('n.uid', $user->uid)
+    ->condition('n.type', $type)
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+
+  if (in_array($role, $user->roles) && $adult_relax_limit <= $nodes_count) {
+    drupal_set_message(t('Dear user you can add only one Adult relax message'), 'error');
+    drupal_goto($_SERVER['HTTP_REFERER']);
+  }
+
+  return node_add($type);
+}

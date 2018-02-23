@@ -1,0 +1,6 @@
+name = AKM front
+description = Helper module for home page
+core = 7.x
+package = Custom modules
+
+files[] = akm_front.module

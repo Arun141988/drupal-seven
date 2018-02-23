@@ -1,0 +1,702 @@
+<?php
+
+require_once (dirname(__FILE__) . '/agent_form.inc');
+require_once (dirname(__FILE__) . '/agent_submit.inc');
+
+/**
+ * Implements hook_init().
+ * 
+ */
+function agent_init() {
+  $uri=array();
+  $uri=explode('/', $_GET['q']);
+  global $base_url,$user;
+  if (($user->uid && in_array('agent', array_values($user->roles))) || in_array('subagent', array_values($user->roles))) {
+    if ($uri[0]=='agent') {
+        drupal_add_css('https://fonts.googleapis.com/icon?family=Material+Icons', 'external');
+        drupal_add_css(drupal_get_path('module','agent').'/css/ghpages-materialize.css');
+        drupal_add_js(drupal_get_path('module','agent').'/js/jquery-1.11.0.min.js');
+        drupal_add_js(drupal_get_path('module','agent').'/js/custom.js');
+        drupal_add_js(drupal_get_path('module','agent').'/js/classie.js');
+        drupal_add_js(drupal_get_path('module','agent').'/js/jquery-2.1.4.min.js');
+        drupal_add_js(drupal_get_path('module','agent').'/js/materialize.js');
+        drupal_add_js(drupal_get_path('module','agent').'/js/init.js');
+        drupal_add_js(drupal_get_path('module','agent').'/js/jquery.auto-complete.js');
+    }
+  }
+}
+
+/**
+ * Implements hook_permission().
+ * 
+ */
+function agent_permission() {
+	return array(
+     'agent profile'=>array(
+        'title'=>t('Agent Profile'),
+        ),
+     );
+}
+
+/**
+ * Implements hook_menu().
+ * 
+ */
+function agent_menu()
+{
+    $items['agent/applications'] =array(
+        'title' => 'Agent Applicatons Listing',
+        'page callback' => 'agent_applications_list',
+        'access arguments' => array('agent profile'),
+        );
+    $items['agent/clients'] =array(
+        'title' => 'Agent Clients Listing',
+        'page callback' => 'agent_clients_list',
+        'access arguments' => array('agent profile'),
+        );
+    $items['agent/application/detail/%'] =array(
+        'title'            =>  'View Applicatons',
+        'page callback'    =>  'agent_application_detail',
+        'page arguments'   =>   array(3),
+        'access arguments' =>   array('agent profile'),
+        );
+    $items['agent/add/client']=array(
+        'title'=>t('Client'),
+        'description'=>t('please input multi-form appliaction'),
+        'page callback'=>'drupal_get_form',
+        'page arguments'=>array('agent_client_form'),
+        'access arguments'=>array('agent profile')
+        );
+
+    $items['agent/edit/%/client']=array(
+        'title'=>t('Client'),
+        'description'=>t('please input multi-form appliaction'),
+        'page callback'=>'drupal_get_form',
+        'page arguments'=>array('agent_client_form',2),
+        'access arguments'=>array('agent profile')
+        );
+
+    $items['agent/client/add/application'] =array(
+        'title'            =>  'Add Applicatons',
+        'description'   =>    t('please input multi-form appliaction'),
+        'page callback'    =>  'drupal_get_form',
+        'page arguments'    =>  array('add_application_form'),
+        'access arguments' =>   array('agent profile'),
+        );
+    $items['agent/client/add/%/application'] =array(
+        'title'            =>  'Add Applicatons',
+        'description'   =>    t('please input multi-form appliaction'),
+        'page callback'    =>  'drupal_get_form',
+        'page arguments'    =>  array('add_application_form',3),
+        'access arguments' =>   array('agent profile'),
+        );
+    $items['agent/client/edit/%/%/application'] =array(
+        'title'            =>  'Add Applicatons',
+        'description'   =>    t('please input multi-form appliaction'),
+        'page callback'    =>  'drupal_get_form',
+            'page arguments'    =>  array('add_application_form',3,4), // 3 is clientid and 4 is application id
+            'access arguments' =>   array('agent profile'),
+            );
+    $items['agent/client/add/%/document'] =array(
+        'title'            =>  'Add Documents',
+        'description'   =>    t('please input multi-form appliaction'),
+        'page callback'    =>  'drupal_get_form',
+        'page arguments'    =>  array('add_document_form',3),
+        'access arguments' =>   array('agent profile'),
+        );
+
+    $items['agent/client/add/document'] =array(
+        'title'            =>  'Add Documents',
+        'description'   =>    t('please input multi-form appliaction'),
+        'page callback'    =>  'drupal_get_form',
+        'page arguments'    =>  array('add_document_form'),
+        'access arguments' =>   array('agent profile'),
+        );
+
+    $items['agent_status_change'] = array(
+      'page callback'    => 'agent_ukuni_status_change',
+      'access arguments'=>array('agent profile'),
+      'type' => MENU_CALLBACK,
+      );
+    return $items;
+}
+
+/*
+ * Implement agent_applications_list() function.
+ */
+function agent_applications_list() {
+    global $base_url,$user;
+    $query=db_select('application_step2','s')->extend('PagerDefault')->limit(10);
+    $query->leftJoin('node','u','u.nid=s.unid');
+    $query->leftJoin('node','c','c.nid=s.cnid');
+    $query->join('application','app','app.uid=s.uid');
+    $query->condition('app.agentuid',$user->uid,'=');
+    $query->fields('s',array('id','uid','unid','cnid','intake','entry_year','pre_sessional_english','status','date_modified'));
+    $query->addField('u','title','u_title');
+    $query->addField('c','title','c_title');
+    $query->addField('app','firstname','name');
+    $query->addField('app','surname','surname');
+    $query->orderBy('s.id','DESC');
+    $result=$query->execute();
+    foreach($result as $val) {
+        $app[]=(array)($val);
+    }
+    $application_detail['applications']=$app;
+    $pager = theme('pager');
+    return  theme('agent_applications', array('applications' => $application_detail , 'pager' => $pager));
+    // Call a theme or you have no pass any argument in theme to change a 'nodes'=> NULL or 'pager'=>NULL.
+}
+
+/*
+ * Implements agent_clients_list() function to get agent client list.
+ */
+function agent_clients_list() {
+    global $base_url,$user;
+    $query=db_select('application','o')->extend('PagerDefault')->limit(10)
+    ->condition('o.step1',1,'=')
+    ->condition('o.agentuid',$user->uid,'=')
+    ->fields('o',array('uid','firstname','surname','birthday','gender','address','city','district','zip','mail','telephone','current_institution','current_course','same_file','telephone','other_name','basic_status','date_modified'))
+    ->orderBy('o.uid','DESC');
+    $result=$query->execute();
+    $pager = theme('pager');
+    return  theme('agent_clients', array('clients' => $result , 'pager' => $pager));
+    //call a theme or you have no pass any argument in theme to change a 'nodes'=> NULL or 'pager'=>NULL
+}
+
+/*
+ * Implements hook_theme().
+ */
+function agent_theme(){
+   return array(
+    'agent_clients' => array (            
+            'variables' => array('clients' => NULL,'pager' => NULL), //this is pass avarible of templates file
+            'template' => 'agent-clients',
+            'path' => drupal_get_path('module', 'agent').'/templates',
+            ),
+    'agent_applications' => array (            
+            'variables' => array('applications' => NULL,'pager' => NULL), //this is pass avarible of templates file
+            'template' => 'agent-applications',
+            'path' => drupal_get_path('module', 'agent').'/templates',
+            ),
+    'agent_application_detail' => array (            
+            'variables' => array('application' => NULL), //this is pass avarible of templates file
+            'template' => 'agent-application-detail',
+            'path' => drupal_get_path('module', 'agent').'/templates',
+            ),
+    'agent_client_form' => array (
+       'render element'    => 'form',
+       'path'              => drupal_get_path('module', 'agent').'/templates',
+       'template'          => "add-agent-client",
+       ),
+    'add_application_form' => array (
+       'render element'    => 'form',
+       'path'              => drupal_get_path('module', 'agent').'/templates',
+       'template'          => "add-application",
+       ),
+    'add_document_form' => array (
+       'render element'    => 'form',
+       'path'              => drupal_get_path('module', 'agent').'/templates',
+       'template'          => "add-document",
+       ),
+    );
+}
+
+/*
+ * Implements agent_application_detail() to get details of agents.
+ */
+function agent_application_detail($user_id) {
+    global $base_url,$user;
+    check_agent_user_edit_permissions($user_id);
+    $query=db_select('application','o')
+    ->condition('o.agentuid',$user->uid,'=')
+    ->condition('o.uid',$user_id,'=')
+    ->fields('o');
+    $result=$query->execute();
+    $application_detail = array();
+    foreach($result as $val) {
+        $application_detail['prifile']=(array)($val);
+    }
+    $query=db_select('application_step2','s');
+    $query->leftJoin('node','u','u.nid=s.unid');
+    $query->leftJoin('node','c','c.nid=s.cnid');
+    $query->condition('s.uid',$user_id,'=');
+    $query->fields('s',array('id','unid','cnid','intake','entry_year','pre_sessional_english','status'));
+    $query->addField('u','title','u_title');
+    $query->addField('c','title','c_title');
+    $result=$query->execute();
+    foreach($result as $val) {
+        $app[]=(array)($val);
+    }
+    $application_detail['applications']=$app;
+
+    $query = db_select('application_doc_details', 'appdoc_detail');
+    $query->condition('appdoc_detail.user_id', $user_id, '=');
+    $query->fields('appdoc_detail');
+    $result = $query->execute();
+    foreach($result as $record){
+     $file = file_load($record->fid);
+     if($file) {
+         $record->filename=$file->filename;
+         $record->fullpath = file_create_url($file->uri);
+     }
+     $retresult[]=(array)$record;
+ }
+ $application_detail['document']=$retresult;
+ return  theme('agent_application_detail', array('appdetail' => $application_detail));
+}
+
+/*
+ * Generate intake entry name.
+ */
+function intake_entry_name($name,$key) {
+    $return='';
+    if($key!=''){
+     switch ($name){
+        case 'intake':
+        $intake_list_array = array(
+            ' ' => t('Select Intakes'),
+            1 => 'Jan 2016',
+            7 => 'Apr 2016',
+            2 => 'Sep 2016',
+            3 => 'Jan 2017',
+            8 => 'Apr 2017',
+            9 => 'Sep 2017',
+            10 => 'Jan 2018',
+            11 => 'Apr 2018',
+            12 => 'Sep 2018',
+            6 => 'Other',
+            4 => 'Jan 2015',
+            5 => 'Apr 2015',
+            0 => 'Sep 2015',
+            );
+        $return=$intake_list_array[$key];
+        break;
+        case 'entry_year':
+        $entry_years = array(
+            '' => t('Select'),
+            '0' => t('Year 1'),
+            '1' => t('Year 2'),
+            '2' => t('Year 3'),
+            );
+        $return=$entry_years[$key];
+        break ;
+    }
+}
+return $return;
+}
+
+/*
+ * Implements agent_insitution_ajax() form function.
+ */
+function agent_insitution_ajax($form,$form_state) {
+    if (!empty($form_state['values']['courses']['institution'])) {
+        $title_uni = $form_state['values']['courses']['institution'];
+        $nid_uni = $courses_record[$i]['institution'];
+        $courses = application_get_courses_by_nid($title_uni);
+    }
+    $form['courses']['course']['#options'] = $courses;   
+    return $form['courses']['course'];
+}
+
+/*
+ * Implements agent_get_client_basic_info() to get client basic info.
+ */
+function agent_get_client_basic_info($clientid){
+	global $user;
+	$query=db_select('application','o');
+	$query->condition('o.uid',$clientid,'=');
+  $query->condition('o.agentuid',$user->uid,'=');
+  $query->fields('o',array('uid','firstname','surname','promo_code','country','nationality','visa','passport_number','passport_expiry_date','country_of_app','gpa_score','current_course_level','gpa_type','test_type','test_score','speaking_test_score','writing_test_score','listening_test_score','reading_test_score','birthday','gender','address','city','district','zip','mail','telephone','current_institution','current_course','step1','step2','step3','step4','step5','preferred_currency','fees_budget','scholarship'));
+  $result=$query->execute();
+  $info=array();
+  $info['firstname']='';
+  $info['surname']='';
+  $info['promo_code']='';
+  $info['country']='';
+  $info['nationality']='';	
+  $info['visa'] = '';
+  $info['passport_number']='';
+  $info['country_of_app']='';
+  $info['gpa_score']='';	
+  $info['current_course_level'] = '';	
+  $info['gpa_type'] = '';	
+  $info['test_type'] =  '';	
+  $info['test_score'] = '';	
+  $info['speaking_test_score'] = '';
+  $info['writing_test_score']= 0;	
+  $info['writing_test_score'] = '';	
+  $info['reading_test_score'] = '';  
+  $info['passport_expiry_day'] = '';  
+  $info['passport_expiry_month'] = '';  
+  $info['passport_expiry_year'] = '';	
+  $info['day'] = '';	
+  $info['month'] ='';	
+  $info['year'] = '';	
+  $info['gender'] = '';
+  $info['address']='';
+  $info['city']='';
+  $info['district']='';
+  $info['zip']='';
+  $info['preferred_currency']='';
+  $info['fees_budget']='';
+  $info['scholarship']='';	
+  $info['mail']='';	
+	$info['telephone']='';
+	$info['current_institution']='';
+	$info['current_course']='';
+	$info['step1']=0;
+	$info['step2']=0;
+	$info['step3']=0;
+	$info['step4']=0;
+	$info['step5']=0;
+	foreach($result as $record){
+    $info['firstname']=$record->firstname;
+    $info['surname']=$record->surname;
+    $info['promo_code']=$record->promo_code;
+    $info['country']=$record->country;
+    $info['nationality']=$record->nationality;
+    $info['visa']=$record->visa;
+    $info['passport_number']=$record->passport_number;
+    $info['country_of_app']=$record->country_of_app;
+    $info['gpa_score']=$record->gpa_score;
+    $info['current_course_level']=$record->current_course_level;
+    $info['gpa_type']=$record->gpa_type;
+    $info['test_type']=$record->test_type;
+    $info['test_score']=$record->test_score;
+    $info['speaking_test_score']=$record->speaking_test_score;
+    $info['writing_test_score']=$record->writing_test_score;
+    $info['listening_test_score']=$record->listening_test_score;
+    $info['reading_test_score']=$record->reading_test_score;
+    if ($record->passport_expiry_date){
+        $passport_expiry_day = date('d/m/Y',$record->passport_expiry_date);
+    }
+    else {
+      $passport_expiry_year='';
+    }
+    $info['passport_expdate'] = $passport_expiry_day;
+
+    if ($record->birthday){
+        $birthday = date('d/m/Y',$record->birthday);
+    }
+    else {
+        $birthday = '';
+    }
+    $info['birthday'] = $birthday;
+    $info['gender']=$record->gender;
+    $info['address']=$record->address;
+    $info['city']=$record->city;
+    $info['district']=$record->district;
+    $info['zip']=$record->zip;
+    $info['mail']=$record->mail;
+    $info['telephone']=$record->telephone;
+    $info['current_institution']=$record->current_institution;
+    $info['current_course']=$record->current_course;
+    $info['step1']=$record->step1;
+    $info['step2']=$record->step2;
+    $info['step3']=$record->step3;
+    $info['step4']=$record->step4;
+    $info['step5']=$record->step5;
+    $info['preferred_currency']=$record->preferred_currency;
+    $info['fees_budget']=$record->fees_budget;
+    $info['scholarship']=$record->scholarship;
+  }
+  return $info;
+}
+
+/*
+ * Implements agent_client_list().
+ */
+function agent_client_list() {
+    global $user;
+    $matches=array();
+    $result=db_select('application','o')
+    ->fields('o',array('uid','firstname','surname'))
+    ->condition('agentuid',$user->uid,'=')
+    ->execute();
+    $matches[] = 'Select Client';
+    foreach($result as $row){
+      $matches[$row->uid] = check_plain($row->firstname).' '.check_plain($row->surname);
+  }
+  return $matches;
+}
+
+/*
+ * This function use for set inactive or agent client accounts tab.
+ */
+function agent_setactive_or_inactive($clientID=''){
+    $return_class_arry=array();
+    $info=agent_get_client_basic_info($clientID);
+    $return_class_arry['acc_class']='';
+    $return_class_arry['acc']='';
+    $return_class_arry['bsc_class']='';
+    $return_class_arry['bsc']='';
+    $return_class_arry['acad_class']='';
+    $return_class_arry['engli_class']='';
+    $return_class_arry['fina_class']='';
+    $return_class_arry['acad']='';
+    $return_class_arry['fina']='';
+    if(is_array($info) && count($info)>0){
+      if($info['step1']==1){
+         $return_class_arry['acc']='<i class="material-icons md-36 ng-binding checkcircle-color" style="margin-right:0;">check_circle</i>';
+     } else {
+        $return_class_arry['acc_class']='active';
+        $return_class_arry['acc']='<i class="material-icons md-36 ng-binding" style="margin-right:0;">cancel</i>';
+    }
+    if($info['step2']==1){
+        $return_class_arry['bsc']='<i class="material-icons md-36 ng-binding checkcircle-color" style="margin-right:0;">check_circle</i>';
+
+    } else {
+        if($info['step1']==1){
+           unset($return_class_arry['acc_class']);
+           $return_class_arry['acc_class']='';
+           $return_class_arry['bsc_class']='active';
+       }
+       $return_class_arry['bsc']='<i class="material-icons md-36 ng-binding" style="margin-right:0;">cancel</i>';
+   }
+
+   if($info['step3']==1){
+     $return_class_arry['acad']='<i class="material-icons md-36 ng-binding checkcircle-color" style="margin-right:0;">check_circle</i>';
+ } else {
+    if($info['step1']==1 && $info['step2']==1){
+        unset($return_class_arry['acc_class']);
+        unset($return_class_arry['bsc_class']);
+        $return_class_arry['acc_class']='';
+        $return_class_arry['bsc_class']='';
+        $return_class_arry['acad_class']='active';
+    }
+    $return_class_arry['acad']='<i class="material-icons md-36 ng-binding" style="margin-right:0;">cancel</i>';
+}
+
+if($info['step4']==1){
+    $return_class_arry['engli']='<i class="material-icons md-36 ng-binding checkcircle-color" style="margin-right:0;">check_circle</i>';
+
+} else {
+    if($info['step1']==1 && $info['step2']==1 && $info['step3']==1){
+        unset($return_class_arry['acc_class']);
+        unset($return_class_arry['bsc_class']);
+        $return_class_arry['acc_class']='';
+        $return_class_arry['bsc_class']='';
+        $return_class_arry['engli_class']='active';
+    }
+    $return_class_arry['engli']='<i class="material-icons md-36 ng-binding" style="margin-right:0;">cancel</i>';
+}
+
+if($info['step5']==1){
+    $return_class_arry['fina']='<i class="material-icons md-36 ng-binding checkcircle-color" style="margin-right:0;">check_circle</i>';
+
+} else {
+    if($info['step1']==1 && $info['step2']==1 && $info['step3']==1 && $info['step4']==1){
+        unset($return_class_arry['acc_class']);
+        unset($return_class_arry['bsc_class']);
+        unset($return_class_arry['engli_class']);
+        $return_class_arry['acc_class']='';
+        $return_class_arry['bsc_class']='';
+        $return_class_arry['engli_class']='';
+        $return_class_arry['fina_class']='active';
+    }
+    $return_class_arry['fina']='<i class="material-icons md-36 ng-binding" style="margin-right:0;">cancel</i>';
+}
+}
+return $return_class_arry;
+}
+
+/*
+ * Implement check_agent_user_edit_permissions().
+ */
+function check_agent_user_edit_permissions($clientID){
+    global $user;
+    if(intval($clientID)>0){
+        $query = db_select('application','o')
+        ->condition('o.uid',$clientID,'=')
+        ->condition('o.agentuid',$user->uid,'=')
+        ->fields('o',array('uid'));
+        $result = $query->execute();
+        foreach($result as $record){
+            $uid = $record->uid;
+        }
+        if($uid==''){
+            drupal_set_message(t('You are not authorized to edit this user.'), 'error');
+            return drupal_access_denied();           
+        }
+    }
+}
+
+/*
+ * This fuction check for user step.
+ */
+function agent_checking_application_form_step($clientID) {
+    $msg    =   array();
+    $steps_completed=0;
+    $info=agent_get_client_basic_info($clientID);
+    $steps_completed = $info['step1'] + $info['step2'] + $info['step3'];
+    if($steps_completed<3){
+        $msg['step1']['status']=1;
+        $msg['step1']['msg']='Please Complete Profile';
+    } else {
+        $msg['step1']['status']=0;
+        $msg['step1']['msg']='';
+    }
+    $has_info = false;
+    $query = db_select('application_step2', 'os');
+    $query->fields('os', array('unid', 'status', 'id'));
+    $query->condition('os.uid', $clientID, '=');
+    $result = $query->execute();
+    foreach ($result as $record) {
+        $has_info = true;
+    }
+    if(!($has_info)){
+        $msg['step2']['status']=1;
+        $msg['step2']['msg']='Please Create Applications';
+    } else {
+        $msg['step2']['status']=0;
+        $msg['step2']['msg']='';
+    }
+
+    /*Checking Document upload or not*/
+    $has_info = false;
+    $query = db_select('application_doc_details', 'os_doc');
+    $query->fields('os_doc', array('id'));
+    $query->condition('os_doc.user_id', $clientID, '=');
+    $result = $query->execute();
+    foreach ($result as $record) {
+        $has_info = true;
+    }
+    if(!($has_info)){
+        $msg['step3']['status']=1;
+        $msg['step3']['msg']='Please first upload all required documents.';
+    } else {
+        $msg['step3']['status']=0;
+        $msg['step3']['msg']='';
+    }
+    return  $msg;
+}
+
+/*
+ * Get agent application status
+ */
+function agent_get_application_status($clientID,$applicationId) {
+    $statusname='';
+    if (intval($applicationId)>0) {
+        $query = db_select('application_step2', 's');
+        $query->condition('s.uid', $clientID, '=');
+        $query->condition('s.id', $applicationId, '=');
+        $query->fields('s', array('id','status'));
+        $result = $query->execute();
+        foreach ($result as $record) {
+            $statusname = $record->status;
+        }
+    }
+    return $statusname;
+}
+
+/*
+ * Get agent uploaded documents.
+ */
+function agent_get_document($DocumentType,$clientID){
+    global $user;
+    if(trim($DocumentType)!=''){
+        $query = db_select('application_doc_details', 'appdoc_detail');
+        $query->condition('appdoc_detail.user_id', $clientID, '=');
+        $query->condition('appdoc_detail.DocumentType', $DocumentType, '=');
+        $query->fields('appdoc_detail');
+        $result = $query->execute();
+        foreach($result as $record){
+          $file = file_load($record->fid);
+          if($file) {
+              $record->filename=$file->filename;
+              $record->fullpath = file_create_url($file->uri);
+          }
+          if($record->delete_access=='YES') {
+              $record->delete_access='YES';
+          }else{
+              $record->delete_access='-';
+          }
+          $retresult[]=$record;
+        }        
+        return $retresult;
+        exit;
+    }
+}
+
+/*
+ * Implement function to check Subagent Access.
+ */
+function checkSubagentAccess(){
+    global $user;
+    if (in_array('subagent', array_values($user->roles))) {
+        drupal_set_message(t('You are not authorized to access this url.'), 'error');
+        drupal_goto('agent/clients');
+    }
+}
+
+/*
+ * Implement function find_agent_client_basic_status_by_key().
+ */
+function find_agent_client_basic_status_by_key($basicstatus_key) {
+  switch ($basicstatus_key) {
+    case 'prospect':
+    return 'Prospect';
+    break;
+    case 'signed':
+    return 'Signed';
+    break;
+    case 'applied':
+    return 'Applied';
+    break;
+    case 'offer':
+    return 'Offer';
+    break;
+    case 'cas':
+    return 'CAS';
+    break;
+    case 'visa':
+    return 'UKuni Visa';
+    break;
+    case 'nonprospect':
+    return 'Non-prospect';
+    break;
+    default:
+    return '';
+    break;
+  }
+}
+
+/*
+ * Implements agent_get_agent_uid_by_sugar_hash_id().
+ */
+function agent_get_agent_uid_by_sugar_hash_id($sugarhash_id) {
+  $returndata='0';
+  if($sugarhash_id!=''){
+     $sugarhash_id=trim($sugarhash_id);
+     $query = db_select('users', 'u');
+     $query->join('field_data_field_sugar_agent_id', 'crmagent_hash_id', 'u.uid = crmagent_hash_id.entity_id');
+     $query->fields('u', array('uid'))
+     ->condition('crmagent_hash_id.field_sugar_agent_id_value', $sugarhash_id, '=')
+     ->condition('crmagent_hash_id.language', 'und', '=');
+     $result = $query->execute();
+     if(!empty($result)){
+         foreach ($result as $record) {
+             $returndata=$record->uid;
+         }
+     }
+     $agent_user=user_load($returndata);
+     if ((in_array('agent', array_values($agent_user->roles))) || in_array('subagent', array_values($agent_user->roles))) {
+         $returndata=$record->uid;
+     } else {
+         $returndata=0;
+     }
+ }
+ return $returndata;
+ exit;
+}
+
+/*
+ * Implements showTrancateString().
+ */
+function showTrancateString($string,$showchar=0) {
+ $str=$string;
+ if (strlen($string)>$showchar) {
+     $str=substr($string, 0, $showchar).'...';
+ }
+ return $str;
+}

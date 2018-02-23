@@ -1,0 +1,8 @@
+name = Provide custom blocks
+description = Create and allow to use custom blocks
+core = 7.x
+package = Custom modules
+
+files[] = akm_blocks.module
+
+dependencies[] = block

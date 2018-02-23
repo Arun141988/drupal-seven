@@ -1,0 +1,6 @@
+name = AKM video page
+description = Create a token for display list of videos
+core = 7.x
+package = Custom modules
+
+files[] = akm_video.module

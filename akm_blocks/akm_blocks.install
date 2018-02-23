@@ -1,0 +1,13 @@
+<?php
+/**
+ * @file
+ * Install, update and uninstall functions for the akm_blocks module.
+ */
+
+/**
+ * Implements hook_uninstall().
+ */
+function akm_blocks_uninstall() {
+  db_delete('variable')->condition('name', 'akm_blocks_%', 'LIKE')->execute();
+  cache_clear_all('variables', 'cache_bootstrap');
+}

@@ -1,0 +1,10 @@
+name = User invoices
+description = Integrate invoices to users. Allow bulk operation for invoices and users.
+core = 7.x
+package = Custom modules
+
+files[] = gce_invoices.module
+
+dependencies[] = user
+dependencies[] = entity
+dependencies[] = gce_invoices
