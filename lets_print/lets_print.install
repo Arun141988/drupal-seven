@@ -1,0 +1,119 @@
+<?php
+
+/**
+ * @file
+ * Removing all PDF set variables and checks for mPDF library existence.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function lets_print_install() {
+  // Default value of some custom varibles.
+  variable_set('lets_print_pdf_page_size', 'A4');
+  variable_set('lets_print_pdf_font_size', 10);
+  variable_set('lets_print_pdf_default_font', 'DejaVuSerif');
+  variable_set('lets_print_pdf_filename', '[site:name] - [node:title] - [node:changed:custom:Y-m-d]');
+  variable_get('lets_print', 'lets_print');
+
+  drupal_load('module', 'lets_print');
+}
+
+/*
+ * Implements hook_enable().
+ */
+function lets_print_enable() {
+  lets_print_create_folder();
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function lets_print_uninstall() {
+  // Removing all custom varible.
+  db_query("DELETE FROM {variable} WHERE name LIKE 'lets_print_%'");
+
+  lets_print_clear_folder(NULL, TRUE);
+}
+
+/**
+ * Implements hook_requirements().
+ */
+function lets_print_requirements($phase) {
+  $requirements = array();
+
+  // Ensure translations do not break at install time.
+  $t = get_t();
+
+  if (module_exists('libraries') == TRUE) {
+    // Search for mpdf tool first.
+    $pattern = '/^mpdf.php$/';
+    // Libraries module to detect mPDF library in case of multisite installation.
+    $tools = array_keys(file_scan_directory(libraries_get_path('mpdf'), $pattern));
+    // mPDF library looked for in the module directory itself.
+    $tools = array_merge($tools, array_keys(file_scan_directory(drupal_get_path('module', 'lets_print'), $pattern)));
+  }
+  if (isset($tools[0])) {
+    $requirements['lets_print_pdf_library_exist'] = array(
+      'title' => $t('PDF using mPDF Library'),
+      'value' => $t('Installed'),
+      'severity' => REQUIREMENT_OK,
+    );
+  }
+  else {
+    $requirements['lets_print_pdf_library_exist'] = array(
+      'title' => $t('PDF using mPDF Library'),
+      'value' => $t('Not found !'),
+      'severity' => REQUIREMENT_WARNING,
+      'description' => $t('<p>No mPDF Library Found in "sites/all/libraries" or "!default_module_path". Please download the PHP mPDF Library API from <a href="http://www.mpdf1.com/">mPDF1.com</a> </p>', array(
+        '!default_module_path' => drupal_get_path('module', 'lets_print'),
+        )),
+    );
+  }
+  return $requirements;
+}
+
+/**
+ * Removes all pdf file and delete the folder.
+ *
+ * @param class $pdfmpdf
+ *   A variable holding standard class.
+ *
+ * @param boolean #delete
+ *   Variable indicating whether to delete folder permanently.
+ */
+function lets_print_clear_folder(stdClass $pdfmpdf = NULL, $delete = FALSE) {
+  $folder = variable_get('lets_print', 'lets_print');
+  $folder = file_build_uri($folder);
+  return lets_print_delete_recursive($folder, $delete);
+}
+
+/**
+ * Deletes all files and directories in the specified filepath recursively.
+ *
+ * If the specified path is a file then it will be passed to
+ * file_unmanaged_delete().
+ *
+ * Note that this only deletes visible files with write permission.
+ *
+ * @param string $folder_pth
+ *   A string containing either an URI or a file or directory path.
+ *
+ * @param boolean $delete_permanently
+ *   A boolean value indicating wheteher to delete folder permanently or not.
+ */
+function lets_print_delete_recursive( $folder_pth, $delete_permanently = FALSE ) {
+  $folder_pth = drupal_realpath($folder_pth);
+  if (is_dir($folder_pth)) {
+    $dir = dir($folder_pth);
+    while (($cs_file = $dir->read()) !== FALSE) {
+      // condition to avoid deleting of peer folders
+      if($cs_file != '.' && $cs_file != '..'){
+        $cs_file_path = $folder_pth . '/' . $cs_file;
+        file_unmanaged_delete_recursive($cs_file_path, TRUE);
+      }
+    }
+    $dir->close();
+    return $delete_permanently ? drupal_rmdir($folder_pth) : TRUE;
+  }
+}

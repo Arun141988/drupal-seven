@@ -1,0 +1,107 @@
+@font-face {
+	font-family: 'Material Icons';
+	font-style: normal;
+	font-weight: 400;
+	src: url(MaterialIcons-Regular.eot);
+	src: url(../fonts/Materials-Icon.woff2) format('woff2'),url(../fonts/MaterialIcons-Regular.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'FontAwesome';
+  src: url('../fonts/fontawesome-webfont.eot?v=4.7.0');
+  src: url('../fonts/fontawesome-webfont.eot?#iefix&v=4.7.0') format('embedded-opentype'), url('../fonts/fontawesome-webfont.woff2?v=4.7.0') format('woff2'), url('../fonts/fontawesome-webfont.woff?v=4.7.0') format('woff'), url('../fonts/fontawesome-webfont.ttf?v=4.7.0') format('truetype'), url('../fonts/fontawesome-webfont.svg?v=4.7.0#fontawesomeregular') format('svg');
+  font-weight: normal;
+  font-style: normal;
+}
+.custom-lets-print .print-page::before{
+	content: "\e555";
+}
+.custom-lets-print  .print-mail::before{
+	content: "\e0e2";
+}
+.custom-lets-print .print-pdf::before{
+	content: "\f019";
+}
+.custom-lets-print .print_feedback .print-custom-js::before {
+	content: "\e87f" ;
+}
+.custom-lets-print .print-page:after,.custom-lets-print  .print-mail::after,.custom-lets-print .print-pdf::after{
+	display: none;
+}
+
+.custom-lets-print .print-page::before,.custom-lets-print  .print-mail::before,.custom-lets-print .print-custom-js::before {
+	font-family: Material Icons;
+	color: #ed1c24;
+	display: block;
+	font-size: 22px;
+}
+.custom-lets-print .print-pdf::before{
+	font-family: fontAwesome;
+	color: #ed1c24;
+	display: block;
+	font-size: 22px;
+}
+.custom-lets-print .print-page,.custom-lets-print .print-mail,.custom-lets-print .print-pdf {
+	color: #ed1c24;
+	height: 45px;
+	font-size: 15px;
+	font-weight: 300;
+	text-align: left;
+	padding: 10px 9px;
+	background-color: #fff;
+	border-bottom: 0;
+	display: inline-block;
+	margin-top: 15px;
+	position: relative;
+	text-align: center;
+	width: auto !important;
+}
+.custom-lets-print .print-page,.custom-lets-print .print-mail,.custom-lets-print .print-pdf{
+	color: #000 ;
+	height: 43px ;
+	width: 165px ;
+	font-size: 15px ;
+	font-weight: 300 ;
+	text-align: center ;
+	padding: 12px 14px ;	
+	border-bottom: 0 ;
+	display: inline-block;
+	margin-top: 15px;
+	position: relative;
+	padding-left: 0px;
+	padding-right: 27px;
+}
+.custom-lets-print .print-page:hover,.custom-lets-print .print-mail:hover,.custom-lets-print .print-pdf:hover{
+	color: red;
+	text-decoration: none;
+}
+.custom-lets-print .print-page:after,.custom-lets-print .print-mail:after{
+	font-family: 'Material Icons';
+	color: #000;
+	background-color: rgb(174,170,170);
+	padding: 9px 14px;
+	float: right;
+	position: absolute;
+	right: 0;
+	top: 0;
+	font-size: 18px;
+}
+.custom-lets-print .print-pdf:after{
+	font-family: fontAwesome;
+	color: #000;
+	background-color: rgb(174,170,170);
+	padding: 9px 14px;
+	float: right;
+	position: absolute;
+	right: 0;
+	top: 0;
+	font-size: 18px;
+}
+.custom-lets-print .print-page:after{
+	content: "\e555";
+}
+.custom-lets-print .print-mail:after {
+	content: "\e0e2";
+}
+.custom-lets-print .print-pdf:after {
+	content: "\f019";
+}

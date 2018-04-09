@@ -1,0 +1,809 @@
+<?php
+
+/**
+ * @file
+ * Prints PDF for a given html node view.
+ */
+
+define('LETS_PRINT_PDF_DEFAULT_FILENAME', '[site:name] - [node:title] - [node:changed:custom:Y-m-d]');
+define('PRINT_TYPE_LINK_TEXT_ENABLED_DEFAULT', 0);
+
+
+
+/**
+ * Implements hook_init().
+ */
+function lets_print_init() {
+    global $user, $language;
+
+    $top_block = block_load('lets_print', 'print_style');
+    $top_block_output = _block_get_renderable_array(_block_render_blocks(array($top_block)));    
+		$style = '';
+		if(isset($top_block_output['block_print_style']['#markup'])){
+			$style = strip_tags($top_block_output['block_print_style']['#markup']);    
+		}    
+		drupal_add_js(array('lets_print' => array('printcss' => $style)), array('type' => 'setting'));
+}    
+
+
+/**
+ * Implements hook_permission().
+ */
+function lets_print_permission() {
+  return array(
+    'generate pdf using mpdf' => array(
+      'title' => t('Generate PDF using mPDF library'),
+      'description' => t('Permission for HTML to PDF conversion'),
+    ),
+    'administer pdf settings' => array(
+      'title' => t('Access PDF using PDF settings'),
+      'description' => t('Permission for accessing pdf settings'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function lets_print_menu() {  
+
+  $items['node/%node/pdf'] = array(
+    'title' => 'Generate PDF',
+    'page callback' => 'lets_print_generate_pdf',
+    'page arguments' => array(1),
+    'access callback' => '_lets_print_attributes_access',
+    'access arguments' => array(1),
+    'type' => MENU_LOCAL_TASK,
+    'context' => MENU_CONTEXT_PAGE | MENU_CONTEXT_INLINE,
+    'file' => 'lets_print_pdf.pages.inc',
+  );
+  return $items;
+}
+
+/**
+ * Generate the PDF file using the mPDF library.
+ *
+ * @param string $html
+ *   contents of the template already with the node data.
+ * @param string $filename
+ *   name of the PDF file to be generated.
+ */
+function _lets_print_pdf_generator($html, $filename = NULL, $nid) {
+  $node = node_load($nid);    
+  
+  ini_set('Display_errors', 'On');
+  error_reporting(0);
+
+  // International Paper Sizes ( width x height).
+  $paper_size = array(
+    '4A0' => array('w' => 1682, 'h' => 2378),
+    '2A0' => array('w' => 1189, 'h' => 1682),
+    'A0' => array('w' => 841, 'h' => 1189),
+    'A1' => array('w' => 594, 'h' => 841),
+    'A2' => array('w' => 420, 'h' => 594),
+    'A3' => array('w' => 297, 'h' => 420),
+    'A4' => array('w' => 210, 'h' => 297),
+    'A5' => array('w' => 148, 'h' => 210),
+    'A6' => array('w' => 105, 'h' => 148),
+    'A7' => array('w' => 74, 'h' => 105),
+    'A8' => array('w' => 52, 'h' => 74),
+    'A9' => array('w' => 37, 'h' => 52),
+    'A10' => array('w' => 26, 'h' => 37),
+
+    'B0' => array('w' => 1000, 'h' => 1414),
+    'B1' => array('w' => 707, 'h' => 1000),
+    'B2' => array('w' => 500, 'h' => 707),
+    'B3' => array('w' => 353, 'h' => 500),
+    'B4' => array('w' => 250, 'h' => 353),
+    'B5' => array('w' => 176, 'h' => 250),
+    'B6' => array('w' => 125, 'h' => 176),
+    'B7' => array('w' => 88, 'h' => 125),
+    'B8' => array('w' => 62, 'h' => 88),
+    'B9' => array('w' => 44, 'h' => 62),
+    'B10' => array('w' => 31, 'h' => 44),
+
+    'C0' => array('w' => 917, 'h' => 1297),
+    'C1' => array('w' => 648, 'h' => 917),
+    'C2' => array('w' => 458, 'h' => 648),
+    'C3' => array('w' => 324, 'h' => 458),
+    'C4' => array('w' => 229, 'h' => 324),
+    'C5' => array('w' => 162, 'h' => 229),
+    'C6' => array('w' => 114, 'h' => 162),
+    'C7' => array('w' => 81, 'h' => 114),
+    'C8' => array('w' => 57, 'h' => 81),
+    'C9' => array('w' => 40, 'h' => 57),
+    'C10' => array('w' => 28, 'h' => 40),
+
+    'RA0' => array('w' => 860, 'h' => 1220),
+    'RA1' => array('w' => 610, 'h' => 860),
+    'RA2' => array('w' => 430, 'h' => 610),
+    'SRA0' => array('w' => 900, 'h' => 1280),
+    'SRA1' => array('w' => 640, 'h' => 900),
+    'SRA2' => array('w' => 450, 'h' => 640),
+
+    'Letter' => array('w' => 215.9, 'h' => 279.4),
+    'Legal' => array('w' => 215.9, 'h' => 355.6),
+    'Ledger' => array('w' => 279.4, 'h' => 431.8),
+  );
+
+  $root_path = drupal_get_path('module', 'lets_print');
+  $module_path = drupal_get_path('module', 'lets_print');
+  global $theme_path;
+
+  $page = variable_get('lets_print_pdf_page_size');
+  $font_size = variable_get('lets_print_pdf_font_size');
+  $font_style = variable_get('lets_print_pdf_default_font');
+
+  // DEFAULT PDF margin Values.
+  $margin_top = variable_get('lets_print_margin_top', 16);
+  $margin_right = variable_get('lets_print_margin_right', 15);
+  $margin_bottom = variable_get('lets_print_margin_bottom', 16);
+  $margin_left = variable_get('lets_print_margin_left', 15);
+  $margin_header = variable_get('lets_print_margin_header', 9);
+  $margin_footer = variable_get('lets_print_margin_footer', 9);
+
+  // Creating Instance of mPDF Class Library.
+  $mpdf = new mPDF(
+    '',
+    array($paper_size[$page]['w'], $paper_size[$page]['h']),
+    $font_size,
+    $font_style,
+    $margin_left,
+    $margin_right,
+    $margin_top,
+    $margin_bottom,
+    $margin_header,
+    $margin_footer
+  );
+
+  // set document DPI
+  $mpdf->dpi = (int) variable_get('lets_print_dpi', 96);
+
+  // Set image DPI
+  $mpdf->img_dpi = (int) variable_get('lets_print_img_dpi', 96);
+
+  // Enabling header option if available.
+  $header = variable_get('lets_print_pdf_header');
+  if (isset($header) && $header != NULL) {
+    $header = token_replace($header);
+    $mpdf->SetHTMLHeader($header);
+  }
+
+  // Enabling Footer option if available.
+  $footer = variable_get('lets_print_pdf_footer');
+  if (isset($footer) && $footer != NULL) {
+    $footer = token_replace($footer);
+    $mpdf->SetHTMLFooter($footer);
+  }
+  
+  // Setting Password to PDF.
+  $password = variable_get('lets_print_pdf_password');
+  if (isset($password) && $password != NULL) {
+    // Print and Copy is allowed.
+    $mpdf->SetProtection(array('print', 'copy'), $password, $password);
+  }
+
+  // Setting CSS stylesheet to PDF.
+  $stylesheet = variable_get('lets_print_pdf_css_file');
+  $stylesheet_content = NULL;
+  if (isset($stylesheet) && $stylesheet != NULL) {
+    $css_file_module = file_scan_directory($module_path, '/.*\.css$/');
+    $css_file_theme = file_scan_directory($theme_path, '/.*\.css$/');
+    // Check module directory
+    if (isset($css_file_module[$module_path . '/' . $stylesheet])) {
+      $stylesheet_content = file_get_contents($module_path . '/' . $stylesheet);
+      $mpdf->WriteHTML($stylesheet_content, 1);
+    }
+    // Check theme directory
+    elseif (isset($css_file_theme[$theme_path . '/' . $stylesheet])) {
+      $stylesheet_content = file_get_contents($theme_path . '/' . $stylesheet);
+      $mpdf->WriteHTML($stylesheet_content, 1);
+    }
+    else {
+      drupal_set_message(t('CSS style Sheet mentioned in PDF setting was not found.'), 'warning');
+      return TRUE;
+    }
+  }
+
+  // Writing html content for pdf buffer.
+
+  $mpdf->WriteHTML($html);
+
+  // Generating PDF File.
+
+  switch(variable_get('lets_print_pdf_save_option')) {
+    case 1:
+      // Dialog box for Download as PDF.
+      $mpdf->Output($filename . '.pdf', 'D');
+      exit;
+      break;
+    case 2:
+      $folder = lets_print_get_folder();
+      if (is_dir(drupal_realpath($folder)) ) {
+        if (!lets_print_is_writable(drupal_realpath($folder))) { die('not writtable');
+          if (drupal_rmdir($folder)) {
+            drupal_mkdir($folder);
+            drupal_chmod($folder, 0777);
+          }
+          else {
+            drupal_set_message(t("Please ensure that public folder is writable."));
+            exit;
+          }
+        }
+      } else {
+        if (lets_print_is_writable(drupal_realpath(file_build_uri('public://')))) {
+          drupal_mkdir($folder);
+          drupal_chmod($folder, 0777);
+        }
+        else {
+          drupal_set_message(t("Please ensure that public folder is writable."));
+          exit;
+        }
+      }
+      // Save to server 'Public file system path'.
+      $path = $folder . '/' . $filename . '.pdf';
+      $mpdf->Output($path , 'F');
+      drupal_goto($_SERVER['HTTP_REFERER']);
+      exit;
+      break;
+    case 0:
+    default:
+      // Open in same browser.
+      $mpdf->Output($filename . '.pdf', 'I'); 
+      exit;
+      break;
+  }
+  
+  return TRUE;
+}
+
+
+/**
+ * API to generate a PDF file.
+ *
+ * @param string $html
+ *   html is rendered HTML that will be converted into PDF.
+ *
+ * @param string $lets_print_pdf_filename
+ *   lets_print_pdf_filename is Optional name of the PDF file.
+ *
+ * @return bool
+ *   TRUE if PDF is successfully generated and FALSE if it isn't.
+ */
+function lets_print_api($html, $lets_print_pdf_filename = NULL) {
+  if (lets_print_pdf_library_exist() == TRUE) {
+    if ($lets_print_pdf_filename === NULL) {
+      $filename = explode(variable_get('lets_print_pdf_filename'), '[site:name]');
+      $lets_print_pdf_filename = token_replace($filename[0]);
+    }
+    _lets_print_pdf_generator($html, $lets_print_pdf_filename);
+  }
+  else {
+    drupal_set_message(t('No mPDF Library Found in "sites/all/libraries" or "!default_module_path". Please download PHP mPDF PDF generation tool from <a href="http://www.mpdf1.com/">mPDF1.com</a>', array(
+          '!default_module_path' => drupal_get_path('module', 'lets_print'),
+        )), 'warning');
+  }
+}
+
+/*
+ * Function to check if a folder/file is writable
+ */
+function lets_print_is_writable($path) {
+  if ($path{strlen($path)-1} == '/') {
+    return drupal_is_writable($path . uniqid(mt_rand()) . '.tmp');
+  }
+  elseif (is_dir($path)) {
+    return lets_print_is_writable($path . '/' . uniqid( mt_rand()) . '.tmp');
+  }
+  $rm = file_exists( $path );
+  $f = @fopen( $path, 'a' );
+  if ($f === FALSE)
+    return FALSE;
+  fclose( $f );
+  if (!$rm)
+    unlink( $path );
+  return TRUE;
+}
+
+/*
+ * Function to create lets_print folder
+ */
+function lets_print_create_folder(stdClass $pdfmpdf = NULL) {
+  $folder = lets_print_get_folder($pdfmpdf);
+  $result = file_prepare_directory($folder, FILE_CREATE_DIRECTORY | FILE_MODIFY_PERMISSIONS);
+  if ( !$result ) {
+    watchdog('file system', 'The directory %folder does not exist or is not writable.', array('%folder' => $folder), WATCHDOG_ERROR);
+  }
+  drupal_chmod($folder, 0777);
+  return $result;
+}
+
+/**
+ *  Get the folder for pdf files.
+ */
+function lets_print_get_folder(stdClass $pdfmpdf = NULL) {
+  $folder = &drupal_static(__FUNCTION__);
+  if ( !isset($folder) ) {
+    $folder = variable_get('lets_print', 'lets_print');
+  }
+  if ( !empty($pdfmpdf->smid) ) {
+    return file_build_uri($folder . '/' . $pdfmpdf->smid);
+  }
+  else {
+    return file_build_uri($folder);
+  }
+}
+
+
+/**
+ * Check for generate PDF permission.
+ *
+ * @param string $node
+ *   Node array for currnet node.
+ *
+ * @return bool
+ *   TRUE if permision allow and FALSE if access denied.
+ */
+function _lets_print_attributes_access($node) {
+
+  if (user_access('generate pdf using mpdf')) {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+/**
+ * Function to check existence of mPDF library.
+ *
+ * @return bool
+ *   TRUE if mPDF library path exists and FALSE if it isn't.
+ */
+function lets_print_pdf_library_exist() {
+  $tools = array();
+
+  // Search for mpdf tool first.
+  $pattern = '/^mpdf.php$/';
+
+  // Libraries module to detect mPDF library in case of multisite installation.
+  $tools = array_keys(file_scan_directory(libraries_get_path('mpdf'), $pattern));
+
+  // mPDF library looked for in the module directory itself.
+  $tools = array_merge($tools, array_keys(file_scan_directory(drupal_get_path('module', 'lets_print'), $pattern)));
+
+  if (isset($tools[0])) {
+    require_once $tools[0];
+    return TRUE;
+  }
+  else {
+    return FALSE;
+  }
+}
+
+
+
+/**
+ * @file
+ * Simple form placed in block.
+ */
+
+/**
+ * Implements hook_block_info().
+ */
+function lets_print_block_info() {
+  $blocks = array();
+  $blocks['lets_print'] = array(
+    'info' => t('Email, Print, PDF and Feedback'),
+    'cache' => DRUPAL_NO_CACHE,
+  );
+  $blocks['print_style'] = array(
+    'info' => t('Enter CSS for the print function'),
+    'cache' => DRUPAL_NO_CACHE,
+  );
+
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function lets_print_block_view($delta = '') {
+  global $base_url, $language, $user;
+
+	drupal_add_css( drupal_get_path('module','lets_print') . '/css/lets_print.css'); 
+	drupal_add_js( drupal_get_path('module','lets_print') . '/js/lets_print.js'); 
+
+  $block = array();
+  $node_details =  menu_get_object();
+  if($node_details){
+	$node_uid = $node_details->uid;
+	$node_user_details = user_load($node_uid);    		
+	$auther_email = $node_user_details->mail;        
+	$node_path = 'node/' . (int) $node_details->nid;
+   
+	$node_alias = drupal_get_path_alias($node_path);  
+
+	if($language->language == 'en'){
+	  $mail_encodedSub = rawurlencode($node_details->title);
+	  $mail_body = '<p>Hi,</p>';
+	  $mail_body .= '<p>I thought you should see this page about '.$node_details->title.'. The link for this is below ::</p>';
+	  $mail_body .= '<p>URL : '.$base_url . '/'. $language->language . '/' . $node_alias;        
+	  $mail_encodeBody = rawurlencode(drupal_html_to_text($mail_body));
+	  $mail_uri = "mailto:?subject=$mail_encodedSub&body=$mail_encodeBody";
+	  $mail_encodedUri = htmlspecialchars($mail_uri);
+	  
+	  $feed_encodedTo = rawurlencode($auther_email);
+	  $feed_encodedSub = rawurlencode('Feedback on ' .$node_details->title);
+	  $feed_body = '<p>Hi,</p>';
+	  $feed_body .= '<p>I have some feedback on the '.$node_details->title.'. The link for this is below ::</p>';
+	  $feed_body .= '<p>URL : '.$base_url . '/'. $language->language . '/' . $node_alias;        
+	  $feed_body .= '<p>Feedback:</p>'; 
+	  $feed_encodeBody = rawurlencode(drupal_html_to_text($feed_body));                
+	  $feed_uri = "mailto:$feed_encodedTo?Subject=$feed_encodedSub&body=$feed_encodeBody";
+	  $feed_encodedUri = htmlspecialchars($feed_uri);  
+	} 
+	else {          
+	  $mail_body = '<p>○○さん</p>';          
+	  $mail_encodedSub = rawurlencode('情報共有');
+	  $mail_body .= '<p>以下のページが興味深いです。是非お読みください。</p>';          
+	  $mail_body .= '<p>URL : '.$base_url . '/'. $language->language . '/' . $node_alias;        
+	  $mail_encodeBody = rawurlencode(drupal_html_to_text($mail_body));
+	  $mail_uri = "mailto:?subject=$mail_encodedSub&body=$mail_encodeBody";
+	  $mail_encodedUri = htmlspecialchars($mail_uri);
+	  
+	  $feed_encodedTo = rawurlencode($auther_email);          
+	  $feed_encodedSub = rawurlencode('フィードバック');
+	  $feed_body = '<p>サイト担当者様、</p>';
+	  $feed_body .= '<p>私はいくつかのフィードバックが次のページについてあります。::</p>';          
+	  $feed_body .= '<p>URL : '.$base_url . '/'. $language->language . '/' . $node_alias;                  
+	  $feed_encodeBody = rawurlencode(drupal_html_to_text($feed_body));                
+	  $feed_uri = "mailto:$feed_encodedTo?Subject=$feed_encodedSub&body=$feed_encodeBody";
+	  $feed_encodedUri = htmlspecialchars($feed_uri);
+
+	}                                        
+  }else{
+        $mail_encodedUri = '';
+        $feed_encodedUri = '';
+  } 
+  switch ($delta) {
+    case 'lets_print':
+		$block['title'] = t('Email, Print, PDF and Feedback');
+		$block['content'] = '';
+		$nid = preg_replace('!^node/!', '', $_GET['q']);
+		if (ctype_digit($nid)) {
+			$node = node_load($nid);
+			if (!node_access('view', $node)) {
+			  // If the user doesn't have access to the node, don't show any links
+			  $block['content'] = '';
+			  return;
+			}
+		}
+		else {
+			$node = NULL;
+		}
+		$links = '';
+		$pdf_url = $base_url . '/node/' . $nid . '/pdf';		
+		$links .= '<span class="print_html"><a href="javascript:void(0);" title="Click to open print dialog box." onclick="PrintMe()" class="print-page print-page print-custom-js" rel="nofollow">'.t('Print').'</a></span>';
+		$links .= '<span class="print_mail"><a href="'.$mail_encodedUri.'" title="Send this page via mail." class="print-mail print-mail" rel="nofollow">'.t('Email').'</a></span>';
+		$links .= '<span class="print_pdf"><a href="'.$pdf_url.'" title="Click to generate pdf file for the page" class="print-pdf" rel="nofollow">'.t('PDF').'</a></span>'; 
+		$links .= '<span class="print_feedback"><a href="'.$feed_encodedUri.'" title="Click to send feedback by mail" class="print-page print-page print-custom-js" rel="nofollow">'.t('Feedback').'</a></span>';
+		$block['content'] = $links;
+    break;
+    
+    case 'print_style':
+	  if (user_access('access content')) {
+          $block['subject'] = t('Print Style');
+          $block['content'] = variable_get('print-css', '');
+      }
+      else {
+          $block['content'] = '';
+      }
+    break;
+  }  
+  return $block;
+}
+
+/**
+ * Implements hook_block_configure()
+ */
+function lets_print_block_configure($delta = '') {
+  $form = array();
+  if ($delta == 'print_style') {
+    $form['custom_print_css'] = array(
+		'#type' => 'text_format',
+		'#title' => t('Please eneter css code here so that you can apply this code to the print funcrion and also add css code under @media print { }'),				
+		'#weight' => 0,
+		'#default_value' => variable_get('print-css', ''),
+    );
+  }
+	if ($delta == 'lets_print' && (lets_print_pdf_library_exist() == TRUE)) {
+    $form['pdf'] = array(
+      '#type' => 'fieldset',
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+      '#title' => t('PDF Tool Option'),
+    );
+    $filename = variable_get('lets_print_pdf_filename');
+    $form['pdf']['lets_print_pdf_filename'] = array(
+      '#type' => 'textfield',
+      '#title' => t('PDF Filename'),
+      '#required' => TRUE,
+      '#description' => t('Default filename : !default_filename will be used.', array('!default_filename' => LETS_PRINT_PDF_DEFAULT_FILENAME)),
+      '#default_value' => isset($filename) && $filename != NULL ? $filename : LETS_PRINT_PDF_DEFAULT_FILENAME,
+    );    
+    $form['pdf']['lets_print_pdf_save_option'] = array(
+      '#type' => 'radios',
+      '#title' => t('Open PDF File in'),
+      '#options' => array(t('Web Browser'), t('Save Dialog Box'), t('Save to Server')),
+      '#default_value' => variable_get('lets_print_pdf_save_option'),
+      '#description' => t("Default's to Web Browser."),
+    );
+	
+    // PDF page settings.
+    $form['pdf']['page_setting'] = array(
+      '#type' => 'fieldset',
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+      '#title' => t('PDF Page Setting'),
+      '#description' => t('<p>All margin values should be specified as LENGTH in millimetres.</p>'),
+    );
+    $form['pdf']['page_setting']['lets_print_margin_top'] = array(
+      '#type' => 'textfield',
+      '#size' => 5,
+      '#title' => t('Top Margin'),
+      '#default_value' => variable_get('lets_print_margin_top', 16),
+			'#element_validate' => array('margin_top_validate'),	
+    );
+    $form['pdf']['page_setting']['lets_print_margin_right'] = array(
+      '#type' => 'textfield',
+      '#size' => 5,
+      '#title' => t('Right Margin'),
+      '#default_value' => variable_get('lets_print_margin_right', 15),
+			'#element_validate' => array('margin_right_validate'),
+    );
+    $form['pdf']['page_setting']['lets_print_margin_bottom'] = array(
+      '#type' => 'textfield',
+      '#size' => 5,
+      '#title' => t('Bottom Margin'),
+      '#default_value' => variable_get('lets_print_margin_bottom', 16),
+			'#element_validate' => array('margin_bottom_validate'),
+    );
+    $form['pdf']['page_setting']['lets_print_margin_left'] = array(
+      '#type' => 'textfield',
+      '#size' => 5,
+      '#title' => t('Left Margin'),
+      '#default_value' => variable_get('lets_print_margin_left', 15),
+			'#element_validate' => array('margin_left_validate'),
+    );
+    $form['pdf']['page_setting']['lets_print_margin_header'] = array(
+      '#type' => 'textfield',
+      '#size' => 5,
+      '#title' => t('Header Margin'),
+      '#default_value' => variable_get('lets_print_margin_header', 9),
+			'#element_validate' => array('margin_header_validate'),
+    );
+    $form['pdf']['page_setting']['lets_print_margin_footer'] = array(
+      '#type' => 'textfield',
+      '#size' => 5,
+      '#title' => t('Footer Margin'),
+      '#default_value' => variable_get('lets_print_margin_footer', 9),
+			'#element_validate' => array('margin_footer_validate'),
+    );
+    $form['pdf']['page_setting']['lets_print_pdf_font_size'] = array(
+      '#type' => 'textfield',
+      '#size' => 5,
+      '#title' => t('Font Size'),
+      '#default_value' => variable_get('lets_print_pdf_font_size', 10),
+			'#element_validate' => array('font_size_validate'),	
+    );
+    $form['pdf']['page_setting']['lets_print_pdf_default_font'] = array(
+      '#type' => 'select',
+      '#title' => t('Default Font Style'),
+      '#options' => array('DejaVuSerif' => 'Serif', 'DejaVuSerifCondensed' => 'Serif Condensed', 'DejaVuSans' => 'Sans Serif', 'DejaVuSansCondensed' => 'Sans Serif Condensed', 'DejaVuSansMono' => 'Monospaced'),
+      '#default_value' => variable_get('lets_print_pdf_default_font', 'DejaVuSerif'),
+      '#description' => t('This style can be overridden in the stylesheet.'),
+    ); 
+    $form['pdf']['page_setting']['lets_print_pdf_page_size'] = array(
+      '#type' => 'select',
+      '#title' => t('Page Size'),
+      '#options' => array(
+        '2A0' => '2A0', '4A0' => '4A0', 'A0' => 'A0', 'A1' => 'A1', 'A2' => 'A2', 'A3' => 'A3', 'A4' => 'A4',
+        'A5' => 'A5', 'A6' => 'A6', 'A7' => 'A7', 'A8' => 'A8', 'A9' => 'A9', 'A10' => 'A10', 'B0' => 'B0', 'B1' => 'B1',
+        'B2' => 'B2', 'B3' => 'B3', 'B4' => 'B4', 'B5' => 'B5', 'B6' => 'B6', 'B7' => 'B7', 'B8' => 'B8', 'B9' => 'B9',
+        'B10' => 'B10', 'C0' => 'C0', 'C1' => 'C1', 'C2' => 'C2', 'C3' => 'C3', 'C4' => 'C4', 'C5' => 'C5', 'C6' => 'C6',
+        'C7' => 'C7', 'C8' => 'C8', 'C9' => 'C9', 'C10' => 'C10', 'RA0' => 'RA0', 'RA1' => 'RA1', 'RA2' => 'RA2',
+        'SRA0' => 'SRA0', 'SRA1' => 'SRA1', 'SRA2' => 'SRA2', 'Letter' => 'Letter', 'Legal' => 'Legal',
+      ),
+      '#default_value' => variable_get('lets_print_pdf_page_size'),
+    );
+    $form['pdf']['page_setting']['lets_print_dpi'] = array(
+      '#type' => 'textfield',
+      '#size' => 5,
+      '#title' => t('Document DPI'),
+      '#default_value' => variable_get('lets_print_dpi', 96),
+			'#element_validate' => array('dpi_validate'),	
+    );
+    $form['pdf']['page_setting']['lets_print_img_dpi'] = array(
+      '#type' => 'textfield',
+      '#size' => 5,
+      '#title' => t('Image DPI'),
+      '#default_value' => variable_get('lets_print_img_dpi', 96),
+			'#element_validate' => array('img_dpi_validate'),	
+    );
+   
+    // Setting for PDF header.
+    $form['pdf']['head_foot'] = array(
+      '#type' => 'fieldset',
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+      '#title' => t('PDF Header & Footer Option'),
+      '#description' => t('use {PAGENO} for page numbering or {DATE j-m-Y} for current date.'),
+    );
+    $form['pdf']['head_foot']['lets_print_pdf_header'] = array(
+      '#type' => 'textarea',
+      '#title' => t('Header content'),
+      '#description' => t('Use a valid HTML code to write a custom header content. Example:') . ' &#60;div&#62;&#60;img src="http://www.example.com/sites/default/files/company_logo.png" width="300px" height="50px" &#62;&#60;/div&#62; &#60;hr /&#62;',
+      '#default_value' => variable_get('lets_print_pdf_header'),
+    );
+
+    // Setting for PDF footer.
+    $form['pdf']['head_foot']['lets_print_pdf_footer'] = array(
+      '#type' => 'textarea',
+      '#title' => t('Footer content'),
+      '#description' => t('Use a valid HTML code to write a custom footer content. Example:') . ' &#60;hr /&#62; &#60;div style="color:#f00; text-align:center;" &#62; &#60;strong&#62;Your Company&#60;/strong&#62;, web: &#60;a href="http://example.com"&#62;www.example.com&#60;/a&#62;, email : contact@example.com&#60;/div&#62;',
+      '#default_value' => variable_get('lets_print_pdf_footer'),
+    );
+
+    // Setting password to PDF, if entered.
+    $form['pdf']['permission'] = array(
+      '#type' => 'fieldset',
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+      '#title' => t('PDF Password Protection'),
+    );
+    $pwd = variable_get('lets_print_pdf_password');
+    if (isset($pwd) && $pwd != NULL) {
+      $form['pdf']['permission']['msg'] = array(
+        '#type' => 'markup',
+        '#markup' => t('<p>Password : ******** is already set.</p>'),
+      );
+      $form['pdf']['permission']['remove_pwd'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Remove Password'),
+      );
+    }
+    else {
+      $form['pdf']['permission']['lets_print_pdf_password'] = array(
+        '#type' => 'password_confirm',
+        '#description' => t('If password is not required, leave blank. Do not use space in starting and ending of password.'),
+      );
+    }
+    // Setting Style Sheets to PDF.
+    $form['pdf']['style'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Custom Style Sheets for PDF'),
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+      '#description' => t('If not required, leave blank.'),
+    );
+    $form['pdf']['style']['lets_print_pdf_css_file'] = array(
+      '#type' => 'textfield',
+      '#description' => t('Enter your name of css file, Example: style.css. Place all stylesheets either in the same module directory, i.e. "!module_path/" or current theme folder. If the file is in a folder in module or theme directory, enter the name with  path to that folder, for example : "css_folder/custom_style.css".', array('!module_path' => drupal_get_path('module', 'lets_print'))),
+      '#default_value' => variable_get('lets_print_pdf_css_file'),
+    );  
+
+
+
+  }
+  else {
+    // Handling error, if mPDF library does not exist.
+    $form['pdf'] = array(
+      '#type' => 'markup',
+      '#markup' => t('<p>No mPDF Library Found in "sites/all/libraries" or "!default_module_path".<p>Please download PHP mPDF PDF generation tool from <a href="http://www.mpdf1.com/">mPDF1.com</a> </p>', array(
+          '!default_module_path' => drupal_get_path('module', 'lets_print'),
+        )
+      ),
+    );
+  }
+	return $form;
+}
+  
+
+/**
+ * Configuration form Validation check.
+ */
+function margin_top_validate($element) {
+	if (!(is_numeric($element['#value']) && $element['#value'] >= 0)) {
+		form_set_error('lets_print_margin_top', t('PDF top margin should be numeric and greater than -1.'));
+	}	
+}
+function margin_right_validate($element) {
+	if (!(is_numeric($element['#value']) && $element['#value'] >= 0)) {
+		form_set_error('lets_print_margin_right', t('PDF right margin should be numeric and greater than -1.'));
+	}	
+}
+function margin_bottom_validate($element) {
+	if (!(is_numeric($element['#value']) && $element['#value'] >= 0)) {
+		form_set_error('lets_print_margin_bottom', t('PDF bottom margin should be numeric and greater than -1.'));
+	}	
+}
+function margin_left_validate($element) {
+	if (!(is_numeric($element['#value']) && $element['#value'] >= 0)) {
+		form_set_error('lets_print_margin_left', t('PDF left margin should be numeric and greater than -1.'));
+	}	
+}
+function margin_header_validate($element) {
+	if (!(is_numeric($element['#value']) && $element['#value'] >= 0)) {
+		form_set_error('lets_print_margin_header', t('PDF header margin should be numeric and greater than -1.'));
+	}	
+}
+function margin_footer_validate($element) {
+	if (!(is_numeric($element['#value']) && $element['#value'] >= 0)) {
+		form_set_error('lets_print_margin_footer', t('PDF footer margin should be numeric and greater than -1.'));
+	}	
+}
+function font_size_validate($element) {
+	if (!(is_numeric($element['#value']) && $element['#value'] > 1)) {
+		form_set_error('lets_print_pdf_font_size', t('Font size should be numeric and greater than 1.'));
+	}	
+}
+function dpi_validate($element) {
+	if (!(is_numeric($element['#value']) && $element['#value'] > 0)) {
+		form_set_error('lets_print_dpi', t('Document DPI should be numeric and greater than 0.'));
+	}	
+}
+function img_dpi_validate($element) {
+	if (!(is_numeric($element['#value']) && $element['#value'] >= 0)) {
+		form_set_error('lets_print_img_dpi', t('Image DPI should be numeric and greater than 0.'));
+	}	
+} 
+
+ 
+/**
+ * Implements hook_block_save()
+ */
+function lets_print_block_save($delta = '', $edit = array()) {
+	
+	
+  if ($delta == 'print_style') {
+    variable_set('print-css', $edit['custom_print_css']['value']);
+  }
+	if ($delta == 'lets_print') {
+    variable_set('lets_print_pdf_filename', $edit['lets_print_pdf_filename']);
+		variable_set('lets_print_margin_top', $edit['lets_print_margin_top']);
+		variable_set('lets_print_margin_right', $edit['lets_print_margin_right']);
+		variable_set('lets_print_margin_bottom', $edit['lets_print_margin_bottom']);
+		variable_set('lets_print_margin_left', $edit['lets_print_margin_left']);
+		variable_set('lets_print_margin_header', $edit['lets_print_margin_header']);
+		variable_set('lets_print_margin_footer', $edit['lets_print_margin_footer']);
+		variable_set('lets_print_pdf_font_size', $edit['lets_print_pdf_font_size']);
+		variable_set('lets_print_pdf_default_font', $edit['lets_print_pdf_default_font']);
+		variable_set('lets_print_pdf_page_size', $edit['lets_print_pdf_page_size']);	
+		variable_set('lets_print_dpi', $edit['lets_print_dpi']);
+		variable_set('lets_print_img_dpi', $edit['lets_print_img_dpi']);
+		variable_set('lets_print_pdf_header', $edit['lets_print_pdf_header']);
+		variable_set('lets_print_pdf_footer', $edit['lets_print_pdf_footer']);
+		variable_set('lets_print_pdf_password', $edit['lets_print_pdf_password']);
+		variable_set('lets_print_pdf_css_file', $edit['lets_print_pdf_css_file']);
+	  variable_set('lets_print_pdf_save_option', $edit['lets_print_pdf_save_option']);
+	
+  }
+
+}
+ 
+
+/**
+ * Implements hook_preprocess_block()
+ */
+function lets_print_preprocess_block(&$variables) {
+	if ($variables['block']->module == 'lets_print' && $variables['block']->delta == 'lets_print')  $variables['classes_array'][] = drupal_html_class('custom-lets-print');
+}
+
+/**
+ * Implements hook_page_build()
+ */
+function lets_print_page_build(&$page) {
+  $page['page_bottom']['devel'] = array(
+    '#weight' => 25, 
+    '#markup' => '<iframe name="print_frame" width="0" height="0" frameborder="0" src="about:blank"></iframe>',
+  );
+}

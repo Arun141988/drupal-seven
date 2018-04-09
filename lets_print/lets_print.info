@@ -1,0 +1,4 @@
+name = Lets Print
+description = Generate Email, Print, PDF and Feedback for the content.
+core = 7.x
+package = Custom
